@@ -1,0 +1,31 @@
+# Author: Bradley R. Kinnard
+# pinned dependencies for swarm-chatbot
+#
+# NOTE: torch/torchvision/torchaudio must be installed from the
+# nightly cu128 index for Blackwell (sm_120) GPU support:
+#   pip install --pre torch torchvision torchaudio \
+#     --index-url https://download.pytorch.org/whl/nightly/cu128
+
+# gpu inference
+vllm>=0.15.0
+
+# embeddings + vector store
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.4
+numpy>=1.24.0
+
+# config + validation
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+PyYAML>=6.0
+
+# ui
+PyQt6==6.7.0
+
+# http (ollama api)
+requests>=2.31.0
+
+# testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-qt>=4.2.0
