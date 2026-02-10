@@ -802,7 +802,11 @@ class SwarmChatbot:
             prompt_parts.append(f"{constraint_block}\n\n---\n\n")
 
         if grounding_block:
-            prompt_parts.append(f"{grounding_block}\n\n---\n\n")
+            prompt_parts.append(
+                "VERIFIED FACTS FROM WEB SOURCES (these are AUTHORITATIVE -- "
+                "if any draft or user claim contradicts these, the web source is correct):\n\n"
+                f"{grounding_block}\n\n---\n\n"
+            )
 
         prompt_parts.append(f"USER'S QUESTION: {query}\n\n")
         if len(responses) > 1:
@@ -811,26 +815,27 @@ class SwarmChatbot:
                 prompt_parts.append(f"Draft {i} (from {r.source}):\n{r.content}\n\n")
             prompt_parts.append(
                 "---\n"
-                "Look through ALL drafts. Extract every distinct explanation offered.\n"
-                "For each explanation, test it against the question's facts:\n"
-                "- Does it contradict any stated fact? (e.g. claiming two people\n"
-                "  are one person when the question says they are different) REJECT.\n"
-                "- Does it explain why the doctor can say 'he's my son'? If not, REJECT.\n"
-                "Build your answer from ONLY the explanations that pass both tests.\n\n"
+                "CRITICAL: The user may have stated false claims in their question.\n"
+                "Do NOT blindly agree with the user. Cross-check EVERY claim against\n"
+                "the VERIFIED FACTS above. If the user says X but the web sources say Y,\n"
+                "the web sources are correct. Politely correct the user.\n\n"
+                "Extract the best explanations from the drafts. Reject any draft\n"
+                "content that contradicts the verified web sources.\n\n"
             )
         else:
             prompt_parts.append(f"DRAFT ANSWER:\n{responses[0].content}\n\n")
-            prompt_parts.append("---\nPolish this into a clean answer.\n\n")
+            prompt_parts.append(
+                "---\n"
+                "Polish this into a clean answer. If VERIFIED FACTS are above,\n"
+                "correct any errors in the draft using those sources.\n\n"
+            )
 
         prompt_parts.append(
             "Answer the user directly. Match the exact format they asked for.\n"
-            "ONLY use explanations from the drafts above. Do not invent new ones.\n"
-            "If WEB SEARCH RESULTS are provided, cross-check draft claims against them.\n"
-            "Correct any factual errors in the drafts using the web sources.\n"
-            "If fewer valid explanations exist than requested, give fewer.\n"
-            "For each item, explain why it works using the question's facts.\n"
-            "Be specific: 'the doctor is the boy's mother' not 'the doctor is female.'\n"
-            "Equal depth every item. No prefix labels. No summary at the end."
+            "If VERIFIED FACTS are provided, your answer MUST align with them.\n"
+            "If the user stated something false, correct them using the sources.\n"
+            "Do not invent facts. Do not agree with false claims to be polite.\n"
+            "Be specific and cite the source topic when correcting errors."
         )
 
         synthesis_prompt = "".join(prompt_parts)
@@ -846,6 +851,14 @@ class SwarmChatbot:
         result = synth.process_message(synth_msg)
         if result and result.content.strip():
             answer = self._clean_synthesis(result.content)
+
+            # post-synthesis fact-check: if web sources were injected,
+            # run a quick verification pass to catch sycophantic agreement
+            if grounding_block and synth:
+                answer = self._fact_check_pass(
+                    answer, grounding_block, query, synth, query_vec,
+                )
+
             return answer
 
         # synthesizer failed, fall back to highest scored response
@@ -886,6 +899,56 @@ class SwarmChatbot:
                 break
 
         return "\n".join(lines).strip()
+
+    def _fact_check_pass(
+        self,
+        answer: str,
+        grounding_block: str,
+        query: str,
+        synth,
+        query_vec: np.ndarray,
+    ) -> str:
+        """second-pass verification: catch sycophantic agreement with false user claims.
+
+        Small models tend to agree with whatever the user says. This
+        pass explicitly asks: 'does this answer contradict the web sources?'
+        and rewrites if needed. Only runs when web grounding was used.
+        """
+        check_prompt = (
+            f"VERIFIED WEB SOURCES:\n{grounding_block}\n\n---\n\n"
+            f"USER'S MESSAGE: {query}\n\n"
+            f"CURRENT ANSWER:\n{answer}\n\n---\n\n"
+            "TASK: Check if the CURRENT ANSWER contains factual errors by "
+            "comparing it against the VERIFIED WEB SOURCES above.\n\n"
+            "RULES:\n"
+            "- The web sources are CORRECT. They are ground truth.\n"
+            "- If the answer agrees with a false claim from the user that "
+            "contradicts the web sources, you MUST rewrite the answer.\n"
+            "- If the user said something wrong, the corrected answer must "
+            "POLITELY CORRECT them, citing what the sources actually say.\n"
+            "- If the answer is already accurate, return it unchanged.\n\n"
+            "Output ONLY the final corrected answer. No meta-commentary."
+        )
+
+        check_msg = SwarmMessage(
+            source="orchestrator",
+            target="Synthesizer",
+            content=check_prompt,
+            query_embedding=query_vec,
+            cycle=2,
+        )
+
+        try:
+            result = synth.process_message(check_msg)
+            if result and result.content.strip():
+                corrected = self._clean_synthesis(result.content)
+                if len(corrected) > 20:
+                    logger.info("fact-check pass produced correction")
+                    return corrected
+        except Exception as exc:
+            logger.warning("fact-check pass failed: %s", exc)
+
+        return answer
 
     def _retrieve_context(self, query_vec: np.ndarray, thread_id: str) -> str:
         """pull relevant past exchanges from memory to ground agent responses."""
