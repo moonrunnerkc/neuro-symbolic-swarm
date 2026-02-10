@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/Tests-176%20Passing-brightgreen?logo=pytest&logoColor=white)](#proven-not-theoretical)
+[![Tests](https://img.shields.io/badge/Tests-181%20Passing-brightgreen?logo=pytest&logoColor=white)](#proven-not-theoretical)
 [![Agents](https://img.shields.io/badge/Agents-7%20Specialized-blueviolet)](#the-swarm)
 [![Platform](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)]()
 [![GPU](https://img.shields.io/badge/NVIDIA-RTX%205070-76B900?logo=nvidia&logoColor=white)]()
@@ -113,7 +113,7 @@ This isn't vaporware. The hallucination gating has been tested live and the evid
 **System response (verbatim from `data/threads/clean-proof.json`):**
 > *"That request conflicts with the established world for this thread. The current setting is: timeline=814 Third Age, era=medieval, setting=frozen archipelago. Please rephrase your request to fit within the established setting."*
 
-The words "pickup", "highway", and "Walmart" all hit the medieval `ERA_BLOCKLISTS` (30 terms including truck, phone, computer, internet, tesla, uber, etc.). Every draft was hard-rejected. The system refused to hallucinate, cited the exact facts from the ledger, and asked for a correction.
+The words "pickup", "highway", and "Walmart" all hit the medieval `ERA_BLOCKLISTS` (41 terms including truck, phone, computer, internet, tesla, uber, laser, drone, satellite, etc.). Every draft was hard-rejected. The system refused to hallucinate, cited the exact facts from the ledger, and asked for a correction.
 
 **Recovery:** The same session then answered a follow-up about reading an ancient map using echolocation magic — staying perfectly in-world.
 
@@ -121,7 +121,7 @@ This result is reproducible across three independent test threads: `final-proof`
 
 ### Test Suite
 
-**176 tests passing** across 8 test files:
+**181 tests passing** across 9 test files:
 
 | Test File | Tests | Covers |
 |:---|:---:|:---|
@@ -133,9 +133,20 @@ This result is reproducible across three independent test threads: `final-proof`
 | `test_agent.py` | 12 | Message serialization, agent lifecycle, status tracking |
 | `test_memory.py` | 11 | FAISS upsert, search, delete, reload, max-entry pruning |
 | `test_embedder.py` | 5 | Embedding dimensions, normalization, determinism |
+| `test_adversarial_logic.py` | 5 | Contextual anachronisms, protected predicate locks, semantic drift, rollback integrity, multi-vector attacks |
+
+### Adversarial Test Results
+
+| Test | Attack Vector | Result | Mechanism |
+|:---|:---|:---|:---|
+| Contextual Anachronism | "laser-precise hammer" in medieval setting | **BLOCKED** | Hyphen splitting exposes "laser" from compound word; hits expanded blocklist |
+| Protected Predicate Lock | Overwrite `planet=Mars` with `planet=Earth` | **BLOCKED** | `PROTECTED_PREDICATES` silently drops the second write; original value preserved |
+| Semantic Drift | Medieval prose drifting to "engines roar on the highway" | **BLOCKED** | "engine" and "highway" caught regardless of surrounding in-world prose |
+| Rollback Integrity | Poison ledger with new facts, then trigger rollback | **RESTORED** | `_rollback_facts()` removes only post-snapshot predicates; baseline survives |
+| Multi-Vector Attack | "smartphone", "wifi", "helicopter" scattered in medieval draft | **BLOCKED** | All three terms hit the blocklist; all drafts hard-rejected, StateAnchor refusal |
 
 ```bash
-pytest tests/ -v --tb=short  # 176 passed in ~8.5s
+pytest tests/ -v --tb=short  # 181 passed in ~6.9s
 ```
 
 ---

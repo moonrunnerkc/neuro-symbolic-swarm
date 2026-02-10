@@ -603,6 +603,8 @@ class SwarmChatbot:
                 "supermarket", "mall", "electric", "battery", "robot",
                 "laptop", "smartphone", "wifi", "helicopter", "asphalt",
                 "freeway", "engine", "gasoline", "diesel", "radar",
+                "laser", "plasma", "neon", "digital", "hologram",
+                "android", "drone", "satellite", "microchip", "bluetooth",
             },
             "futuristic": {
                 "horse-drawn", "candle", "parchment", "quill", "feudal",
@@ -653,11 +655,17 @@ class SwarmChatbot:
 
             # check 1: anachronism scan -- modern words in a medieval draft
             if blocklist:
-                # strip punctuation from content words for better matching
-                content_words = {
+                # strip punctuation and split hyphenated compounds so
+                # "laser-precise" yields {"laser", "precise"}
+                raw_words = {
                     w.strip(".,!?;:\"'()[]{}")
                     for w in content_lower.split()
                 }
+                content_words: set[str] = set()
+                for w in raw_words:
+                    content_words.add(w)
+                    if "-" in w:
+                        content_words.update(w.split("-"))
                 found_anachronisms = blocklist & content_words
                 if found_anachronisms:
                     contradicts = True
