@@ -1,5 +1,5 @@
 # Author: Bradley R. Kinnard
-"""Left sidebar: agent status cards + thread list."""
+"""Left sidebar: thread list and management."""
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -8,26 +8,21 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
 
 from src.ui.theme import (
     ACCENT,
-    BG_PRIMARY,
     BG_SECONDARY,
-    BORDER,
     FONT_SIZE,
-    FONT_SIZE_HEADER,
     TEXT_MUTED,
     TEXT_PRIMARY,
 )
-from src.ui.widgets.agent_card import AgentCard
 
 
 class SidebarLeft(QWidget):
-    """left panel with agent cards and thread selector."""
+    """left panel with thread selector and management controls."""
 
     thread_selected = pyqtSignal(str)
     new_thread_requested = pyqtSignal()
@@ -35,7 +30,6 @@ class SidebarLeft(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._agent_cards: dict[str, AgentCard] = {}
         self._setup_ui()
 
     def _setup_ui(self) -> None:
@@ -44,25 +38,6 @@ class SidebarLeft(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(8)
-
-        # agents header
-        agents_header = QLabel("Agents")
-        agents_header.setObjectName("header")
-        layout.addWidget(agents_header)
-
-        # scrollable agent cards
-        self._agents_scroll = QScrollArea()
-        self._agents_scroll.setWidgetResizable(True)
-        self._agents_scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
-        self._agents_container = QWidget()
-        self._agents_container.setStyleSheet(f"background-color: {BG_SECONDARY};")
-        self._agents_layout = QVBoxLayout(self._agents_container)
-        self._agents_layout.setSpacing(6)
-        self._agents_layout.addStretch()
-        self._agents_scroll.setWidget(self._agents_container)
-        layout.addWidget(self._agents_scroll, stretch=2)
 
         # threads header + new thread button
         threads_row = QHBoxLayout()
@@ -92,24 +67,18 @@ class SidebarLeft(QWidget):
         )
         layout.addWidget(self._clear_threads_btn)
 
+    # -- agent card stubs (agents now live on right sidebar diagnostics) --
+
     def add_agent_card(self, role: str, model: str) -> None:
-        if role in self._agent_cards:
-            return
-        card = AgentCard(role=role, model=model)
-        idx = self._agents_layout.count() - 1
-        self._agents_layout.insertWidget(idx, card)
-        self._agent_cards[role] = card
+        pass
 
     def remove_agent_card(self, role: str) -> None:
-        if card := self._agent_cards.pop(role, None):
-            self._agents_layout.removeWidget(card)
-            card.deleteLater()
+        pass
 
     def update_agent(self, role: str, status: str, log: str = "") -> None:
-        if card := self._agent_cards.get(role):
-            card.update_status(status)
-            if log:
-                card.update_log(log)
+        pass
+
+    # -- thread management --
 
     def add_thread(self, thread_id: str, summary: str = "") -> None:
         display = thread_id
