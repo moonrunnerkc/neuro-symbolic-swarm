@@ -668,3 +668,30 @@ def test_validate_drafts_uses_thread_id(swarm_dir):
         swarm.close()
     finally:
         swarm_mod._PROJECT_ROOT = original
+
+
+def test_clear_all_threads(swarm_dir):
+    """clear_all_threads should nuke every thread file and wipe the state ledger."""
+    import src.swarm as swarm_mod
+    from src.state_manager import Fact
+    original = _swap_root(swarm_mod, swarm_dir)
+    try:
+        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm.create_thread("alpha")
+        swarm.create_thread("bravo")
+        swarm._state.upsert(Fact(
+            subject="user", predicate="era", obj="medieval", thread_id="alpha",
+        ))
+        assert len(swarm._active_threads) == 2
+        assert swarm._state.size > 0
+
+        removed = swarm.clear_all_threads()
+        assert set(removed) == {"alpha", "bravo"}
+        assert len(swarm._active_threads) == 0
+        assert swarm._state.size == 0
+        # thread files should be gone
+        remaining = list((swarm_dir / "data" / "threads").glob("*.json"))
+        assert len(remaining) == 0
+        swarm.close()
+    finally:
+        swarm_mod._PROJECT_ROOT = original

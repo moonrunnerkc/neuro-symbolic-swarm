@@ -1,14 +1,12 @@
 # Author: Bradley R. Kinnard
-"""Right sidebar: settings panel + debug info."""
+"""Right sidebar: neuro-symbolic diagnostics panel."""
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QComboBox,
     QGroupBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
-    QSlider,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -16,12 +14,18 @@ from PyQt6.QtWidgets import (
 
 from src.ui.theme import (
     ACCENT,
+    ACCENT_DIM,
+    ACCENT_FAINT,
     BG_DEEP,
     BG_SECONDARY,
+    BG_TERTIARY,
     BORDER,
     BORDER_LIGHT,
     FONT_SIZE,
     FONT_SIZE_SMALL,
+    STATUS_ACTIVE,
+    STATUS_ERROR,
+    STATUS_WARN,
     TEXT_MUTED,
     TEXT_PRIMARY,
     TEXT_SECONDARY,
@@ -29,11 +33,8 @@ from src.ui.theme import (
 
 
 class SidebarRight(QWidget):
-    """right panel with config controls and debug output."""
+    """right panel showing live system diagnostics and proof of work."""
 
-    threshold_changed = pyqtSignal(float)
-    max_cycles_changed = pyqtSignal(int)
-    context_window_changed = pyqtSignal(int)
     clear_memory_requested = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -47,80 +48,55 @@ class SidebarRight(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
         layout.setSpacing(10)
 
-        header = QLabel("Settings")
+        header = QLabel("Diagnostics")
         header.setObjectName("header")
         layout.addWidget(header)
 
-        # -- config group --
-        config_group = QGroupBox("Swarm Config")
-        config_layout = QVBoxLayout(config_group)
-        config_layout.setSpacing(8)
+        # -- active agents group --
+        agents_group = QGroupBox("Active Agents")
+        agents_layout = QVBoxLayout(agents_group)
+        agents_layout.setSpacing(4)
 
-        # threshold
-        threshold_label = QLabel("Score Threshold")
-        threshold_label.setStyleSheet(
-            f"color: {TEXT_PRIMARY}; font-weight: bold; font-size: {FONT_SIZE}px;"
+        self._agent_rows: dict[str, QLabel] = {}
+        self._agents_container = QVBoxLayout()
+        agents_layout.addLayout(self._agents_container)
+        layout.addWidget(agents_group)
+
+        # -- state ledger group --
+        ledger_group = QGroupBox("State Ledger")
+        ledger_layout = QVBoxLayout(ledger_group)
+        ledger_layout.setSpacing(6)
+
+        self._ledger_stats = QLabel("no facts")
+        self._ledger_stats.setStyleSheet(
+            f"color: {TEXT_SECONDARY}; font-size: {FONT_SIZE_SMALL}px;"
         )
-        config_layout.addWidget(threshold_label)
+        self._ledger_stats.setWordWrap(True)
+        ledger_layout.addWidget(self._ledger_stats)
 
-        threshold_row = QHBoxLayout()
-        self._threshold_slider = QSlider(Qt.Orientation.Horizontal)
-        self._threshold_slider.setRange(0, 100)
-        self._threshold_slider.setValue(15)
-        self._threshold_slider.valueChanged.connect(self._on_threshold_changed)
-        threshold_row.addWidget(self._threshold_slider, stretch=1)
-
-        self._threshold_value = QLabel("0.15")
-        self._threshold_value.setFixedWidth(50)
-        self._threshold_value.setStyleSheet(
-            f"color: {ACCENT}; font-weight: bold; font-size: {FONT_SIZE}px;"
-        )
-        threshold_row.addWidget(self._threshold_value)
-        config_layout.addLayout(threshold_row)
-
-        # max cycles
-        cycles_label = QLabel("Max Cycles")
-        cycles_label.setStyleSheet(
-            f"color: {TEXT_PRIMARY}; font-weight: bold; font-size: {FONT_SIZE}px;"
-        )
-        config_layout.addWidget(cycles_label)
-
-        self._cycles_combo = QComboBox()
-        self._cycles_combo.addItems(["1", "2", "3", "5", "10"])
-        self._cycles_combo.setCurrentText("1")
-        self._cycles_combo.currentTextChanged.connect(
-            lambda v: self.max_cycles_changed.emit(int(v))
-        )
-        config_layout.addWidget(self._cycles_combo)
-        layout.addWidget(config_group)
+        self._ledger_facts = QTextEdit()
+        self._ledger_facts.setReadOnly(True)
+        self._ledger_facts.setMinimumHeight(100)
+        self._ledger_facts.setMaximumHeight(180)
+        self._ledger_facts.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {BG_DEEP};
+                color: {ACCENT};
+                border: 1px solid {BORDER};
+                font-size: {FONT_SIZE_SMALL}px;
+                padding: 6px;
+                font-family: "Roboto Mono", monospace;
+            }}
+        """)
+        ledger_layout.addWidget(self._ledger_facts)
+        layout.addWidget(ledger_group)
 
         # -- memory group --
         memory_group = QGroupBox("Memory")
         memory_layout = QVBoxLayout(memory_group)
-        memory_layout.setSpacing(8)
+        memory_layout.setSpacing(6)
 
-        ctx_label = QLabel("Context Window")
-        ctx_label.setStyleSheet(
-            f"color: {TEXT_PRIMARY}; font-weight: bold; font-size: {FONT_SIZE}px;"
-        )
-        memory_layout.addWidget(ctx_label)
-
-        ctx_row = QHBoxLayout()
-        self._ctx_slider = QSlider(Qt.Orientation.Horizontal)
-        self._ctx_slider.setRange(0, 20)
-        self._ctx_slider.setValue(5)
-        self._ctx_slider.valueChanged.connect(self._on_ctx_changed)
-        ctx_row.addWidget(self._ctx_slider, stretch=1)
-
-        self._ctx_value = QLabel("5")
-        self._ctx_value.setFixedWidth(30)
-        self._ctx_value.setStyleSheet(
-            f"color: {ACCENT}; font-weight: bold; font-size: {FONT_SIZE}px;"
-        )
-        ctx_row.addWidget(self._ctx_value)
-        memory_layout.addLayout(ctx_row)
-
-        self._memory_stats = QLabel("entries: 0")
+        self._memory_stats = QLabel("entries: 0 | vectors: 0")
         self._memory_stats.setStyleSheet(
             f"color: {TEXT_SECONDARY}; font-size: {FONT_SIZE_SMALL}px;"
         )
@@ -133,59 +109,98 @@ class SidebarRight(QWidget):
         memory_layout.addWidget(self._clear_mem_btn)
         layout.addWidget(memory_group)
 
-        # -- debug group --
-        debug_group = QGroupBox("Debug")
-        debug_layout = QVBoxLayout(debug_group)
+        # -- pipeline log --
+        log_group = QGroupBox("Pipeline Log")
+        log_layout = QVBoxLayout(log_group)
 
-        self._debug_output = QTextEdit()
-        self._debug_output.setReadOnly(True)
-        self._debug_output.setMinimumHeight(140)
-        self._debug_output.setStyleSheet(f"""
+        self._pipeline_log = QTextEdit()
+        self._pipeline_log.setReadOnly(True)
+        self._pipeline_log.setMinimumHeight(120)
+        self._pipeline_log.setStyleSheet(f"""
             QTextEdit {{
                 background-color: {BG_DEEP};
                 color: {TEXT_SECONDARY};
                 border: 1px solid {BORDER};
                 font-size: {FONT_SIZE_SMALL}px;
-                padding: 8px;
+                padding: 6px;
+                font-family: "Roboto Mono", monospace;
             }}
         """)
-        debug_layout.addWidget(self._debug_output)
-        layout.addWidget(debug_group)
+        log_layout.addWidget(self._pipeline_log)
+        layout.addWidget(log_group)
 
         layout.addStretch()
 
-    def _on_threshold_changed(self, value: int) -> None:
-        threshold = value / 100.0
-        self._threshold_value.setText(f"{threshold:.2f}")
-        self.threshold_changed.emit(threshold)
+    # -- public methods --
 
-    def get_max_cycles(self) -> int:
-        return int(self._cycles_combo.currentText())
+    def set_agent_status(self, role: str, model: str, status: str) -> None:
+        """update or create a row in the active agents section."""
+        color_map = {
+            "active": STATUS_ACTIVE,
+            "idle": TEXT_MUTED,
+            "error": STATUS_ERROR,
+        }
+        color = color_map.get(status, TEXT_MUTED)
+        dot = "\u25CF"  # filled circle
 
-    def get_threshold(self) -> float:
-        return self._threshold_slider.value() / 100.0
+        if role not in self._agent_rows:
+            label = QLabel()
+            label.setStyleSheet(f"font-size: {FONT_SIZE_SMALL}px; padding: 1px 0;")
+            self._agents_container.addWidget(label)
+            self._agent_rows[role] = label
 
-    def append_debug(self, text: str) -> None:
-        self._debug_output.append(text)
-        sb = self._debug_output.verticalScrollBar()
-        sb.setValue(sb.maximum())
-
-    def set_debug_stats(self, stats: dict) -> None:
-        mem = stats.get("memory", {})
-        lines = [
-            f"agents:  {stats.get('agent_count', '?')}",
-            f"active:  {stats.get('active_agents', '?')}",
-            f"memory:  {mem.get('entry_count', stats.get('memory_size', '?'))} entries",
-            f"vectors: {mem.get('index_vectors', '?')}",
-            f"threads: {len(stats.get('threads', []))}",
-        ]
-        self._debug_output.setPlainText("\n".join(lines))
-        # update memory stats widget
-        self._memory_stats.setText(
-            f"entries: {mem.get('entry_count', 0)} | "
-            f"vectors: {mem.get('index_vectors', 0)}"
+        row = self._agent_rows[role]
+        row.setText(
+            f'<span style="color:{color}">{dot}</span> '
+            f'<span style="color:{TEXT_PRIMARY}">{role}</span> '
+            f'<span style="color:{TEXT_MUTED}">({model})</span>'
         )
 
-    def _on_ctx_changed(self, value: int) -> None:
-        self._ctx_value.setText(str(value))
-        self.context_window_changed.emit(value)
+    def set_ledger_state(self, thread_id: str, facts: list[dict]) -> None:
+        """display the current thread's state ledger contents."""
+        if not facts:
+            self._ledger_stats.setText(f"thread: {thread_id} | no facts")
+            self._ledger_facts.setPlainText("(empty ledger)")
+            return
+
+        self._ledger_stats.setText(
+            f"thread: {thread_id} | {len(facts)} locked facts"
+        )
+        lines = []
+        for f in facts:
+            pred = f.get("predicate", "?")
+            obj = f.get("obj", "?")
+            # highlight protected predicates
+            protected = {"setting", "genre", "era", "timeline", "planet"}
+            marker = "\U0001F512" if pred in protected else "\u2022"
+            lines.append(f"  {marker} {pred}: {obj}")
+        self._ledger_facts.setPlainText("\n".join(lines))
+
+    def set_debug_stats(self, stats: dict) -> None:
+        """refresh memory stats and agent list from swarm status."""
+        mem = stats.get("memory", {})
+        self._memory_stats.setText(
+            f"entries: {mem.get('entry_count', 0)} | "
+            f"vectors: {mem.get('index_vectors', 0)} | "
+            f"threads: {len(stats.get('threads', []))}"
+        )
+        # update agent rows
+        for agent_info in stats.get("agents", []):
+            self.set_agent_status(
+                role=agent_info["role"],
+                model=agent_info["model"],
+                status=agent_info.get("status", "idle"),
+            )
+
+    def append_log(self, text: str) -> None:
+        """add a timestamped line to the pipeline log."""
+        self._pipeline_log.append(text)
+        sb = self._pipeline_log.verticalScrollBar()
+        sb.setValue(sb.maximum())
+
+    def clear_log(self) -> None:
+        self._pipeline_log.clear()
+
+    # keep backward compat for any code calling append_debug
+    def append_debug(self, text: str) -> None:
+        self.append_log(text)

@@ -114,9 +114,9 @@ class MainWindow(QMainWindow):
         self._chat_area.query_submitted.connect(self._on_query_submitted)
         self._sidebar_left.thread_selected.connect(self._on_thread_selected)
         self._sidebar_left.new_thread_requested.connect(self._on_new_thread)
-        self._sidebar_right.threshold_changed.connect(self._on_threshold_changed)
-        self._sidebar_right.max_cycles_changed.connect(self._on_max_cycles_changed)
-        self._sidebar_right.context_window_changed.connect(self._on_context_window_changed)
+        self._sidebar_left.clear_all_threads_requested.connect(
+            self._on_clear_all_threads
+        )
         self._sidebar_right.clear_memory_requested.connect(self._on_clear_memory)
 
     def _bootstrap(self) -> None:
@@ -154,7 +154,7 @@ class MainWindow(QMainWindow):
             return
         self._chat_area.set_input_enabled(False)
         self._chat_area.show_thinking("embedding query")
-        self._sidebar_right.append_debug(f"> {query[:60]}")
+        self._sidebar_right.append_log(f"> {query[:60]}")
         self._dispatch_query.emit(query, self._current_thread)
 
     @pyqtSlot(str, str)
@@ -168,7 +168,7 @@ class MainWindow(QMainWindow):
         self._chat_area.hide_thinking()
         self._chat_area.add_system_message(f"error: {error}")
         self._chat_area.set_input_enabled(True)
-        self._sidebar_right.append_debug(f"ERROR: {error}")
+        self._sidebar_right.append_log(f"ERROR: {error}")
 
     @pyqtSlot(str)
     def _on_progress(self, stage: str) -> None:
@@ -177,8 +177,15 @@ class MainWindow(QMainWindow):
         if ":" in stage and stage.split(":", 1)[1] in ("active", "idle", "error"):
             role, status = stage.split(":", 1)
             self._sidebar_left.update_agent(role, status)
+            # also update the right sidebar's agent rows
+            agent = next(
+                (a for a in self._swarm._agents if a.role == role), None
+            )
+            if agent:
+                self._sidebar_right.set_agent_status(role, agent.model, status)
             return
         self._chat_area.update_thinking_stage(stage)
+        self._sidebar_right.append_log(stage)
 
     @pyqtSlot(dict)
     def _on_status_update(self, status: dict) -> None:
@@ -189,6 +196,8 @@ class MainWindow(QMainWindow):
                 log=f"processed: {agent_info.get('messages_processed', 0)}",
             )
         self._sidebar_right.set_debug_stats(status)
+        # update state ledger display for current thread
+        self._refresh_ledger()
 
     @pyqtSlot(str)
     def _on_thread_selected(self, thread_id: str) -> None:
@@ -204,29 +213,67 @@ class MainWindow(QMainWindow):
                     self._chat_area.add_swarm_message(msg["content"])
         except ValueError:
             pass
+        self._refresh_ledger()
+
+    def _refresh_ledger(self) -> None:
+        """push current thread's state ledger facts to the right sidebar."""
+        if not self._current_thread:
+            return
+        try:
+            facts = self._swarm._state.query(
+                self._current_thread, include_global=True
+            )
+            fact_dicts = [f.to_dict() for f in facts]
+            self._sidebar_right.set_ledger_state(
+                self._current_thread, fact_dicts
+            )
+        except Exception:
+            self._sidebar_right.set_ledger_state(self._current_thread, [])
 
     @pyqtSlot(float)
     def _on_threshold_changed(self, value: float) -> None:
         self._swarm._app_config.score_threshold = value
         for agent in self._swarm._agents:
             agent.threshold = value
-        self._sidebar_right.append_debug(f"threshold -> {value:.2f}")
+        self._sidebar_right.append_log(f"threshold -> {value:.2f}")
 
     @pyqtSlot(int)
     def _on_max_cycles_changed(self, value: int) -> None:
         self._swarm._app_config.max_cycles = value
-        self._sidebar_right.append_debug(f"max_cycles -> {value}")
+        self._sidebar_right.append_log(f"max_cycles -> {value}")
 
     @pyqtSlot(int)
     def _on_context_window_changed(self, value: int) -> None:
         self._swarm._app_config.context_window = value
-        self._sidebar_right.append_debug(f"context_window -> {value}")
+        self._sidebar_right.append_log(f"context_window -> {value}")
 
     @pyqtSlot()
     def _on_clear_memory(self) -> None:
         self._swarm.clear_memory()
-        self._sidebar_right.append_debug("memory cleared")
+        self._sidebar_right.append_log("memory cleared")
         self._sidebar_right.set_debug_stats(self._swarm.get_status())
+        self._refresh_ledger()
+
+    @pyqtSlot()
+    def _on_clear_all_threads(self) -> None:
+        """wipe all threads, state ledger, and reset to a fresh default thread."""
+        removed = self._swarm.clear_all_threads()
+        self._sidebar_left.clear_all_threads()
+
+        # start fresh
+        default_tid = "default"
+        self._swarm.create_thread(default_tid)
+        self._current_thread = default_tid
+        self._sidebar_left.add_thread(default_tid, "general conversation")
+        self._sidebar_left.select_thread(default_tid)
+
+        self._chat_area.clear_chat()
+        self._chat_area.add_system_message(
+            f"cleared {len(removed)} threads. fresh start."
+        )
+        self._sidebar_right.append_log(f"cleared {len(removed)} threads")
+        self._sidebar_right.set_debug_stats(self._swarm.get_status())
+        self._refresh_ledger()
 
     @pyqtSlot()
     def _on_new_thread(self) -> None:
@@ -245,7 +292,7 @@ class MainWindow(QMainWindow):
             self._chat_area.add_system_message(f"new thread: {tid}")
             self._sidebar_right.set_debug_stats(self._swarm.get_status())
         except Exception as exc:
-            self._sidebar_right.append_debug(f"thread error: {exc}")
+            self._sidebar_right.append_log(f"thread error: {exc}")
 
     def closeEvent(self, event) -> None:
         self._swarm.close()

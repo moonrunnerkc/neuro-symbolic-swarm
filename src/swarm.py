@@ -930,6 +930,21 @@ class SwarmChatbot:
         self._state.save()
         logger.info("memory and state ledger cleared by user")
 
+    def clear_all_threads(self) -> list[str]:
+        """delete all thread files and reset runtime state. returns removed ids."""
+        removed = list(self._active_threads.keys())
+        self._active_threads.clear()
+        for thread_file in self._threads_dir.glob("*.json"):
+            try:
+                thread_file.unlink()
+            except OSError as exc:
+                logger.warning("failed to delete %s: %s", thread_file.name, exc)
+        # also wipe thread-scoped facts from the state ledger
+        self._state.clear_all()
+        self._state.save()
+        logger.info("cleared %d threads and state ledger", len(removed))
+        return removed
+
     def close(self) -> None:
         logger.info("shutting down swarm")
         self._stop_auto_save()

@@ -31,6 +31,7 @@ class SidebarLeft(QWidget):
 
     thread_selected = pyqtSignal(str)
     new_thread_requested = pyqtSignal()
+    clear_all_threads_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -83,6 +84,14 @@ class SidebarLeft(QWidget):
         self._thread_list.itemClicked.connect(self._on_thread_clicked)
         layout.addWidget(self._thread_list, stretch=1)
 
+        # clear all threads
+        self._clear_threads_btn = QPushButton("Clear All Threads")
+        self._clear_threads_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_threads_btn.clicked.connect(
+            self.clear_all_threads_requested.emit
+        )
+        layout.addWidget(self._clear_threads_btn)
+
     def add_agent_card(self, role: str, model: str) -> None:
         if role in self._agent_cards:
             return
@@ -116,6 +125,10 @@ class SidebarLeft(QWidget):
             if item and item.data(Qt.ItemDataRole.UserRole) == thread_id:
                 self._thread_list.takeItem(i)
                 break
+
+    def clear_all_threads(self) -> None:
+        """remove every thread from the list widget."""
+        self._thread_list.clear()
 
     def select_thread(self, thread_id: str) -> None:
         """programmatically select a thread in the list."""
