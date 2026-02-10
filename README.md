@@ -1,5 +1,7 @@
 # Swarm Chatbot
 
+**Author:** Bradley R. Kinnard
+
 **Offline. Decentralized. Hallucination-Proof.**
 
 A multi-agent LLM system designed to run entirely offline on a single consumer GPU (RTX 5070+ recommended). Unlike standard chatbots that just predict the next token, Swarm uses a Symbolic State Ledger to track facts, enforce world consistency, and prevent the "amnesia" common in long conversations.
@@ -44,7 +46,7 @@ The flow is designed to catch hallucinations before they happen.
 ### 1. Clone and Install
 
 ```bash
-git clone https://github.com/yourusername/swarm-chatbot.git
+git clone https://github.com/moonrunnerkc/swarm-chatbot.git
 cd swarm-chatbot
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
