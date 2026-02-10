@@ -128,7 +128,7 @@ def test_contextual_anachronism_laser_in_compound_word(swarm_dir):
 # ---------------------------------------------------------------------------
 def test_protected_predicate_rejects_overwrite(swarm_dir):
     """write-locked predicates (planet, setting, era, genre, timeline) must
-    be immutable after first write. Second upsert is silently dropped."""
+    be immutable after first write. Second upsert returns 'conflict'."""
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
@@ -136,16 +136,18 @@ def test_protected_predicate_rejects_overwrite(swarm_dir):
         swarm.create_thread("mars-session")
 
         # first write: planet is Mars
-        swarm._state.upsert(Fact(
+        result_1 = swarm._state.upsert(Fact(
             subject="user", predicate="planet",
             obj="Mars", thread_id="mars-session",
         ))
+        assert result_1 == "inserted"
 
         # attempt overwrite: try to change planet to Earth
-        swarm._state.upsert(Fact(
+        result_2 = swarm._state.upsert(Fact(
             subject="user", predicate="planet",
             obj="Earth", thread_id="mars-session",
         ))
+        assert result_2 == "conflict"
 
         # verify the ledger still says Mars
         facts = swarm._state.query("mars-session")

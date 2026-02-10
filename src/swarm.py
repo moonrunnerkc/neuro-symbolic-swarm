@@ -313,7 +313,19 @@ class SwarmChatbot:
                     obj=str_val,
                     thread_id=thread_id,
                 )
-                self._state.upsert(fact)
+                result_status = self._state.upsert(fact)
+                if result_status == "conflict":
+                    # the user is trying to establish a new world in a
+                    # thread that already has a locked world state
+                    existing = self._state.query(thread_id)
+                    locked_val = next(
+                        (f.obj for f in existing if f.predicate == key), "?"
+                    )
+                    logger.warning(
+                        "world-lock conflict: '%s' is locked to '%s' in this "
+                        "thread, new value '%s' was rejected. suggest new thread.",
+                        key, locked_val, str_val,
+                    )
 
             self._state.save()
             logger.info(

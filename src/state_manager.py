@@ -134,11 +134,15 @@ class StateManager:
     # as the world "setting", clobbering the real value. lock these after first write.
     PROTECTED_PREDICATES: set[str] = {"setting", "genre", "era", "timeline", "planet"}
 
-    def upsert(self, fact: Fact) -> None:
+    def upsert(self, fact: Fact) -> str:
         """insert or update a fact. overwrites if same subject+predicate exists.
 
         protected predicates (setting, genre, era, timeline) are immutable
-        once established for a thread -- subsequent writes are silently dropped.
+        once established for a thread. subsequent writes are silently dropped.
+
+        Returns:
+            'inserted', 'updated', 'protected' (blocked), or 'conflict'
+            (blocked and the new value differs from the locked value).
         """
         with self._lock:
             tid = fact.thread_id
@@ -149,12 +153,13 @@ class StateManager:
             if existing:
                 # guard world-anchor facts from overwrite
                 if fact.predicate.strip().lower() in self.PROTECTED_PREDICATES:
+                    is_conflict = existing.obj.strip().lower() != fact.obj.strip().lower()
                     logger.debug(
                         "protected predicate '%s' already set, ignoring update "
                         "'%s' -> '%s'",
                         fact.predicate, existing.obj, fact.obj,
                     )
-                    return
+                    return "conflict" if is_conflict else "protected"
                 existing.obj = fact.obj
                 existing.updated_at = time.time()
             else:
@@ -165,6 +170,7 @@ class StateManager:
                 self._prune_thread(tid)
 
             self._dirty = True
+            return "updated" if existing else "inserted"
 
     def _prune_thread(self, thread_id: str) -> None:
         """drop oldest facts to stay under limit. caller must hold _lock."""
