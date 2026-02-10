@@ -28,6 +28,12 @@ from src.config import (
 from src.embedder import embed_text
 from src.memory import MemoryEntry, SharedMemory
 from src.state_manager import Fact, StateManager
+from src.web_search import (
+    build_grounding_block,
+    extract_search_query,
+    needs_grounding,
+    search as web_search,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -197,6 +203,21 @@ class SwarmChatbot:
         progress("extracting facts")
         self._run_fact_extraction(query, thread_id)
 
+        # phase 1a.5: web search grounding -- only on factual queries
+        grounding_block = ""
+        current_genre = ""
+        for f in self._state.query(thread_id):
+            if f.predicate == "genre":
+                current_genre = f.obj
+                break
+        if needs_grounding(query, genre=current_genre):
+            progress("searching web for facts")
+            search_query = extract_search_query(query)
+            hits = web_search(search_query, max_results=3)
+            grounding_block = build_grounding_block(hits)
+            if grounding_block:
+                logger.info("web grounding: %d sources injected", len(hits))
+
         # phase 1b: all non-synthesizer/non-extractor agents answer
         answerers = [
             a for a in self._agents
@@ -228,7 +249,10 @@ class SwarmChatbot:
         else:
             # phase 2: synthesizer combines the validated answers
             progress("synthesizing final answer")
-            final = self._synthesize(query, validated, query_vec, thread_id)
+            final = self._synthesize(
+                query, validated, query_vec, thread_id,
+                grounding_block=grounding_block,
+            )
 
         # free synthesizer model from VRAM after synthesis
         synth_agent = next((a for a in self._agents if a.role == "Synthesizer"), None)
@@ -746,6 +770,7 @@ class SwarmChatbot:
         responses: list[SwarmMessage],
         query_vec: np.ndarray,
         thread_id: str = "",
+        grounding_block: str = "",
     ) -> str:
         """pass agent responses through the synthesizer for a clean final answer."""
         if not responses:
@@ -776,6 +801,9 @@ class SwarmChatbot:
         if constraint_block:
             prompt_parts.append(f"{constraint_block}\n\n---\n\n")
 
+        if grounding_block:
+            prompt_parts.append(f"{grounding_block}\n\n---\n\n")
+
         prompt_parts.append(f"USER'S QUESTION: {query}\n\n")
         if len(responses) > 1:
             prompt_parts.append("DRAFT ANSWERS:\n\n")
@@ -797,6 +825,8 @@ class SwarmChatbot:
         prompt_parts.append(
             "Answer the user directly. Match the exact format they asked for.\n"
             "ONLY use explanations from the drafts above. Do not invent new ones.\n"
+            "If WEB SEARCH RESULTS are provided, cross-check draft claims against them.\n"
+            "Correct any factual errors in the drafts using the web sources.\n"
             "If fewer valid explanations exist than requested, give fewer.\n"
             "For each item, explain why it works using the question's facts.\n"
             "Be specific: 'the doctor is the boy's mother' not 'the doctor is female.'\n"

@@ -25,6 +25,10 @@ PyQt6==6.7.0
 # http (ollama api)
 requests>=2.31.0
 
+# web search (fact grounding)
+tavily-python>=0.5.0
+python-dotenv>=1.0.0
+
 # testing
 pytest>=7.4.0
 pytest-cov>=4.1.0
