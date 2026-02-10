@@ -203,20 +203,21 @@ class SwarmChatbot:
         progress("extracting facts")
         self._run_fact_extraction(query, thread_id)
 
-        # phase 1a.5: web search grounding -- only on factual queries
+        # phase 1a.5: web search grounding -- only when enabled + factual queries
         grounding_block = ""
-        current_genre = ""
-        for f in self._state.query(thread_id):
-            if f.predicate == "genre":
-                current_genre = f.obj
-                break
-        if needs_grounding(query, genre=current_genre):
-            progress("searching web for facts")
-            search_query = extract_search_query(query)
-            hits = web_search(search_query, max_results=3)
-            grounding_block = build_grounding_block(hits)
-            if grounding_block:
-                logger.info("web grounding: %d sources injected", len(hits))
+        if self._app_config.web_search_enabled:
+            current_genre = ""
+            for f in self._state.query(thread_id):
+                if f.predicate == "genre":
+                    current_genre = f.obj
+                    break
+            if needs_grounding(query, genre=current_genre):
+                progress("searching web for facts")
+                search_query = extract_search_query(query)
+                hits = web_search(search_query, max_results=3)
+                grounding_block = build_grounding_block(hits)
+                if grounding_block:
+                    logger.info("web grounding: %d sources injected", len(hits))
 
         # phase 1b: all non-synthesizer/non-extractor agents answer
         answerers = [

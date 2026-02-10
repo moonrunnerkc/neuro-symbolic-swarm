@@ -51,6 +51,7 @@ class AppConfig(BaseModel):
     context_window: int = 5
     cross_thread_memory: bool = False
     auto_save_interval: int = 60
+    web_search_enabled: bool = False
 
 
 def load_agent_config(path: Path) -> AgentConfig:
