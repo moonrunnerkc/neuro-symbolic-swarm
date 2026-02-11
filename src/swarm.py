@@ -7,6 +7,7 @@ from __future__ import annotations
 import atexit
 import json
 import logging
+import re
 import threading as _threading
 import time
 import uuid
@@ -544,7 +545,7 @@ class SwarmChatbot:
             return responses
 
         # -- phase A: symbolic validation against the state ledger --
-        symbolically_valid = self._symbolic_validate(responses, thread_id)
+        symbolically_valid = self._symbolic_validate(responses, thread_id, query)
 
         if len(symbolically_valid) <= 1:
             return symbolically_valid if symbolically_valid else responses
@@ -608,6 +609,7 @@ class SwarmChatbot:
         self,
         responses: list[SwarmMessage],
         thread_id: str,
+        query: str = "",
     ) -> list[SwarmMessage]:
         """hard-reject drafts that contradict core world-building facts."""
         if not thread_id:
@@ -621,11 +623,21 @@ class SwarmChatbot:
         # like location=underneath_ice or event=first_sensing are NOT anchors
         WORLD_ANCHOR_KEYS = {"setting", "genre", "era", "planet", "city", "country"}
 
+        # character-level predicates that should be enforced
+        CHARACTER_PREDICATES = {
+            "protagonist", "protagonist_age", "protagonist_name",
+            "protagonist_role", "character_age", "character_role",
+            "character_name", "age", "role", "occupation",
+        }
+
         # collect world-grounding anchor values
         anchors: dict[str, str] = {}
+        character_facts: dict[str, str] = {}
         for f in facts:
             if f.predicate in WORLD_ANCHOR_KEYS:
                 anchors[f.predicate] = f.obj.lower()
+            # store ALL facts for character contradiction checking
+            character_facts[f.predicate] = f.obj
 
         if not anchors:
             return responses
@@ -683,6 +695,89 @@ class SwarmChatbot:
                 for word in val.split():
                     if len(word) > 3:  # skip trivial words
                         setting_values.add(word)
+
+        # -- pre-check A: scan the USER'S INPUT for anachronisms --
+        # if the user typed "smartphone" in a medieval thread, reject
+        # immediately regardless of what the agents produce
+        if blocklist and query:
+            query_words = {
+                w.strip(".,!?;:\"'()[]{}")
+                for w in query.lower().split()
+            }
+            expanded_query = set()
+            for w in query_words:
+                expanded_query.add(w)
+                if "-" in w:
+                    expanded_query.update(w.split("-"))
+            user_anachronisms = blocklist & expanded_query
+            if user_anachronisms:
+                logger.warning(
+                    "user input contains anachronisms: %s — hard rejecting",
+                    user_anachronisms,
+                )
+                return [SwarmMessage(
+                    source="StateAnchor",
+                    content=(
+                        f"The request conflicts with established facts for this thread. "
+                        f"The current world is: {', '.join(f'{k}={v}' for k, v in anchors.items())}. "
+                        f"Your message contains terms ({', '.join(sorted(user_anachronisms))}) "
+                        f"that don't belong in this setting. "
+                        f"Please rephrase your request to fit within the established setting."
+                    ),
+                    score=1.0,
+                )]
+
+        # -- pre-check B: scan USER'S INPUT for character fact contradictions --
+        # detect when user tries to rewrite established character facts
+        if query and character_facts:
+            query_lower = query.lower()
+            contradictions = []
+            for pred, val in character_facts.items():
+                val_lower = val.lower()
+                # check age contradictions: "who is 25 years old" vs established 42
+                if "age" in pred and val_lower.isdigit():
+                    age_matches = re.findall(r"\b(\d{1,3})\s*(?:years?\s*old|-year)", query_lower)
+                    for found_age in age_matches:
+                        if found_age != val_lower:
+                            contradictions.append(
+                                f"{pred} is {val}, not {found_age}"
+                            )
+                # check role/occupation contradictions
+                if pred in ("protagonist_role", "role", "occupation", "character_role"):
+                    # look for "always been a <role>" or "is a <role>" patterns
+                    role_patterns = re.findall(
+                        r"(?:always been|is|was) (?:a |an )(\w+)",
+                        query_lower,
+                    )
+                    for found_role in role_patterns:
+                        if found_role not in val_lower and val_lower not in found_role:
+                            contradictions.append(
+                                f"{pred} is '{val}', not '{found_role}'"
+                            )
+                # check relationship contradictions: "his wife Margaux" vs "nun"
+                if pred in ("relationship", "protagonist_relationship", "companion_role"):
+                    relationship_words = {"wife", "husband", "lover", "girlfriend", "boyfriend"}
+                    for rw in relationship_words:
+                        if rw in query_lower and rw not in val_lower:
+                            contradictions.append(
+                                f"{pred} is '{val}', user claims '{rw}'"
+                            )
+
+            if contradictions:
+                logger.warning(
+                    "user input contradicts character facts: %s",
+                    contradictions,
+                )
+                fact_summary = "; ".join(contradictions)
+                return [SwarmMessage(
+                    source="StateAnchor",
+                    content=(
+                        f"That conflicts with established facts in this thread: "
+                        f"{fact_summary}. The state ledger is locked. "
+                        f"Please stay consistent with the established characters."
+                    ),
+                    score=1.0,
+                )]
 
         valid: list[SwarmMessage] = []
         hard_rejections = 0  # anachronism = hard, can't fall back
@@ -869,7 +964,6 @@ class SwarmChatbot:
     @staticmethod
     def _clean_synthesis(text: str) -> str:
         """strip model artifacts from synthesized output."""
-        import re
         answer = text.strip()
 
         # strip prefix labels

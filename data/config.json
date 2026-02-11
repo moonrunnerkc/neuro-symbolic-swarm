@@ -9,5 +9,6 @@
   "log_level": "INFO",
   "context_window": 8,
   "cross_thread_memory": false,
-  "auto_save_interval": 60
+  "auto_save_interval": 60,
+  "web_search_enabled": false
 }

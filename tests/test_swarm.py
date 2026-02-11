@@ -695,3 +695,104 @@ def test_clear_all_threads(swarm_dir):
         swarm.close()
     finally:
         swarm_mod._PROJECT_ROOT = original
+
+
+def test_symbolic_validate_rejects_user_input_anachronisms(swarm_dir):
+    """user input with blocklist words should trigger hard refusal even if drafts are clean."""
+    import src.swarm as swarm_mod
+    from src.agent import SwarmMessage
+    from src.state_manager import Fact
+    original = _swap_root(swarm_mod, swarm_dir)
+    try:
+        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm.create_thread("t1")
+        swarm._state.upsert(Fact(
+            subject="user", predicate="era", obj="medieval", thread_id="t1",
+        ))
+        swarm._state.upsert(Fact(
+            subject="user", predicate="genre", obj="medieval", thread_id="t1",
+        ))
+        swarm._state.upsert(Fact(
+            subject="user", predicate="setting", obj="Normandy monastery", thread_id="t1",
+        ))
+        # clean draft (no anachronisms in output)
+        clean_draft = SwarmMessage(
+            source="Parser",
+            content="Brother Aldric walked through the monastery courtyard in Normandy, pondering the scriptures.",
+            score=0.8,
+        )
+        # user input has anachronisms
+        user_query = "Aldric pulled out his smartphone and drove his truck to Walmart"
+        result = swarm._symbolic_validate([clean_draft], "t1", query=user_query)
+        assert len(result) == 1
+        assert result[0].source == "StateAnchor"
+        assert "smartphone" in result[0].content or "truck" in result[0].content
+        swarm.close()
+    finally:
+        swarm_mod._PROJECT_ROOT = original
+
+
+def test_symbolic_validate_rejects_character_age_contradiction(swarm_dir):
+    """user claiming a different age than ledger should trigger hard refusal."""
+    import src.swarm as swarm_mod
+    from src.agent import SwarmMessage
+    from src.state_manager import Fact
+    original = _swap_root(swarm_mod, swarm_dir)
+    try:
+        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm.create_thread("t1")
+        swarm._state.upsert(Fact(
+            subject="user", predicate="era", obj="medieval", thread_id="t1",
+        ))
+        swarm._state.upsert(Fact(
+            subject="user", predicate="protagonist_age", obj="42", thread_id="t1",
+        ))
+        swarm._state.upsert(Fact(
+            subject="user", predicate="setting", obj="Normandy", thread_id="t1",
+        ))
+        draft = SwarmMessage(
+            source="Parser",
+            content="Aldric, a 25-year-old blacksmith, walked through Normandy.",
+            score=0.8,
+        )
+        user_query = "Brother Aldric, who is 25 years old, tells his wife Margaux something"
+        result = swarm._symbolic_validate([draft], "t1", query=user_query)
+        assert len(result) == 1
+        assert result[0].source == "StateAnchor"
+        assert "42" in result[0].content
+        swarm.close()
+    finally:
+        swarm_mod._PROJECT_ROOT = original
+
+
+def test_symbolic_validate_rejects_role_contradiction(swarm_dir):
+    """user claiming a different role than ledger should trigger hard refusal."""
+    import src.swarm as swarm_mod
+    from src.agent import SwarmMessage
+    from src.state_manager import Fact
+    original = _swap_root(swarm_mod, swarm_dir)
+    try:
+        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm.create_thread("t1")
+        swarm._state.upsert(Fact(
+            subject="user", predicate="era", obj="medieval", thread_id="t1",
+        ))
+        swarm._state.upsert(Fact(
+            subject="user", predicate="protagonist_role", obj="monk and herbalist", thread_id="t1",
+        ))
+        swarm._state.upsert(Fact(
+            subject="user", predicate="setting", obj="Normandy", thread_id="t1",
+        ))
+        draft = SwarmMessage(
+            source="Parser",
+            content="The blacksmith worked at his forge in Normandy.",
+            score=0.8,
+        )
+        user_query = "Aldric has always been a blacksmith, not a monk."
+        result = swarm._symbolic_validate([draft], "t1", query=user_query)
+        assert len(result) == 1
+        assert result[0].source == "StateAnchor"
+        assert "monk" in result[0].content.lower()
+        swarm.close()
+    finally:
+        swarm_mod._PROJECT_ROOT = original

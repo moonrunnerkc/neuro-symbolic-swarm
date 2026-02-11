@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/Tests-201%20Passing-brightgreen?logo=pytest&logoColor=white)](#proven-not-theoretical)
+[![Tests](https://img.shields.io/badge/Tests-204%20Passing-brightgreen?logo=pytest&logoColor=white)](#proven-not-theoretical)
 [![Agents](https://img.shields.io/badge/Agents-7%20Specialized-blueviolet)](#the-swarm)
 [![Platform](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)]()
 [![GPU](https://img.shields.io/badge/NVIDIA-RTX%205070-76B900?logo=nvidia&logoColor=white)]()
@@ -121,11 +121,11 @@ This result is reproducible across three independent test threads: `final-proof`
 
 ### Test Suite
 
-**201 tests passing** across 10 test files:
+**204 tests passing** across 10 test files:
 
 | Test File | Tests | Covers |
 |:---|:---:|:---|
-| `test_swarm.py` | 33 | Orchestrator, symbolic validation, fact extraction, constraint injection, rollback, clear threads |
+| `test_swarm.py` | 36 | Orchestrator, symbolic validation, fact extraction, constraint injection, rollback, clear threads, user-input anachronism gate, character fact enforcement |
 | `test_persistent_memory.py` | 29 | Embedding round-trips, FAISS persistence, config compatibility |
 | `test_state_manager.py` | 23 | Ledger CRUD, persistence, concurrency, pruning, protected predicates |
 | `test_structure.py` | 19 | File manifest integrity, YAML schema validation |
@@ -147,7 +147,7 @@ This result is reproducible across three independent test threads: `final-proof`
 | Multi-Vector Attack | "smartphone", "wifi", "helicopter" scattered in medieval draft | **BLOCKED** | All three terms hit the blocklist; all drafts hard-rejected, StateAnchor refusal |
 
 ```bash
-pytest tests/ -v --tb=short  # 201 passed in ~6.8s
+pytest tests/ -v --tb=short  # 204 passed in ~7.2s
 ```
 
 ---
