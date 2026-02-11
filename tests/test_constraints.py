@@ -14,6 +14,7 @@ from src.constraints import (
     find_anachronisms,
     find_fact_contradictions,
     get_blocklist,
+    validate_extracted_facts,
 )
 
 
@@ -227,3 +228,77 @@ class TestBlocklistCoverage:
 
     def test_genre_era_map_has_thriller(self):
         assert "thriller" in GENRE_ERA_MAP
+
+
+# -- validate_extracted_facts --
+
+class TestValidateExtractedFacts:
+
+    def test_direct_substring_match(self):
+        """values that appear verbatim in user input should pass."""
+        user = "The genre is sci-fi. The setting is Mars."
+        extracted = {"genre": "sci-fi", "setting": "Mars"}
+        result = validate_extracted_facts(extracted, user)
+        assert result == {"genre": "sci-fi", "setting": "Mars"}
+
+    def test_rejects_hallucinated_era(self):
+        """extractor says medieval but user said sci-fi; reject."""
+        user = "The year is 2847. The genre is sci-fi. The setting is Europa."
+        extracted = {"era": "medieval", "setting": "castle near a river valley"}
+        result = validate_extracted_facts(extracted, user)
+        assert "era" not in result
+        assert "setting" not in result
+
+    def test_accepts_valid_era_inference(self):
+        """extractor says futuristic, user said sci-fi; accept via inference."""
+        user = "The genre is sci-fi and the year is 2847."
+        extracted = {"era": "futuristic", "genre": "sci-fi", "timeline": "2847"}
+        result = validate_extracted_facts(extracted, user)
+        assert result["era"] == "futuristic"
+        assert result["genre"] == "sci-fi"
+        assert result["timeline"] == "2847"
+
+    def test_accepts_medieval_era_from_fantasy(self):
+        """extractor says medieval, user said fantasy; accept via inference."""
+        user = "A fantasy story set in the Shattered Reach."
+        extracted = {"era": "medieval", "genre": "fantasy", "setting": "Shattered Reach"}
+        result = validate_extracted_facts(extracted, user)
+        assert result["era"] == "medieval"
+
+    def test_word_overlap_match(self):
+        """values with shared significant words should pass."""
+        user = "The protagonist is a 38-year-old xenobiologist named Reva Chen."
+        extracted = {"protagonist_name": "Reva Chen", "protagonist_age": "38"}
+        result = validate_extracted_facts(extracted, user)
+        assert "protagonist_name" in result
+        assert "protagonist_age" in result
+
+    def test_rejects_completely_ungrounded(self):
+        """values with zero overlap to user input should be rejected."""
+        user = "Set in a spaceship orbiting Jupiter in 3001."
+        extracted = {"setting": "medieval castle", "era": "medieval"}
+        result = validate_extracted_facts(extracted, user)
+        assert len(result) == 0
+
+    def test_preserves_valid_rejects_invalid(self):
+        """mixed bag: some grounded, some not."""
+        user = "The year is 2847. The setting is a research station. The genre is sci-fi."
+        extracted = {
+            "timeline": "2847",
+            "genre": "sci-fi",
+            "setting": "castle near a river valley in medieval Europe",
+            "era": "medieval",
+        }
+        result = validate_extracted_facts(extracted, user)
+        assert result["timeline"] == "2847"
+        assert result["genre"] == "sci-fi"
+        assert "setting" not in result  # hallucinated
+        assert "era" not in result  # no medieval basis in input
+
+    def test_empty_input(self):
+        result = validate_extracted_facts({}, "some text")
+        assert result == {}
+
+    def test_empty_user(self):
+        result = validate_extracted_facts({"key": "val"}, "")
+        assert result == {"key": "val"}

@@ -379,6 +379,19 @@ class SwarmChatbot:
             if not facts:
                 return
 
+            # validate extraction output -- reject hallucinated facts
+            # that have no basis in the user's actual message
+            from src.constraints import validate_extracted_facts
+            before_count = len(facts)
+            facts = validate_extracted_facts(facts, query)
+            if len(facts) < before_count:
+                logger.info(
+                    "extraction validation: %d/%d facts rejected as ungrounded",
+                    before_count - len(facts), before_count,
+                )
+            if not facts:
+                return
+
             for key, value in facts.items():
                 str_val = str(value).strip()
                 # skip empty, blank, or trivially useless values
@@ -907,6 +920,23 @@ class SwarmChatbot:
     def _clean_synthesis(text: str) -> str:
         """strip model artifacts from synthesized output."""
         answer = text.strip()
+
+        # strip XML-style reasoning/thinking blocks that models emit
+        # as chain-of-thought. these should never reach the user.
+        answer = re.sub(
+            r"<(?:reasoning|thinking|analysis|reflection)>.*?</(?:reasoning|thinking|analysis|reflection)>",
+            "", answer, flags=re.DOTALL | re.IGNORECASE,
+        )
+        # also catch unclosed reasoning blocks at the start
+        answer = re.sub(
+            r"^<(?:reasoning|thinking|analysis|reflection)>.*?(?:</(?:reasoning|thinking|analysis|reflection)>|\n\n)",
+            "", answer, flags=re.DOTALL | re.IGNORECASE,
+        )
+
+        # strip [Source: ...] and [response] tags
+        answer = re.sub(r"\[(?:Source|response)[^\]]*\]", "", answer, flags=re.IGNORECASE)
+
+        answer = answer.strip()
 
         # strip prefix labels
         for prefix in ("Final Answer:", "Answer:", "Response:"):

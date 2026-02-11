@@ -7,7 +7,10 @@ without touching the orchestrator."""
 
 from __future__ import annotations
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 # -- era blocklists --
 # words that don't belong in a given technology era.
@@ -219,3 +222,79 @@ def find_fact_contradictions(
                     )
 
     return contradictions
+
+
+# -- extraction validation --
+# synonyms and inference rules for world-building predicates.
+# if the user says "sci-fi" and the extractor infers "futuristic" for era,
+# that's a valid inference even though "futuristic" doesn't appear verbatim.
+
+VALID_ERA_INFERENCES: dict[str, set[str]] = {
+    # genre keywords that validly imply an era
+    "medieval": {"fantasy", "medieval", "historical", "middle ages", "dark ages"},
+    "futuristic": {"sci-fi", "science fiction", "cyberpunk", "space opera",
+                   "futuristic", "space", "deep-space", "starship", "2847"},
+    "modern": {"modern", "contemporary", "thriller", "mystery", "present day",
+               "current day", "detective", "noir"},
+}
+
+
+def validate_extracted_facts(
+    extracted: dict[str, str],
+    user_input: str,
+) -> dict[str, str]:
+    """filter extraction output to only facts grounded in user input.
+
+    Small models hallucinate facts the user never stated. This checks
+    that each extracted value has SOME basis in the actual user text.
+    Returns only the validated subset.
+    """
+    if not extracted or not user_input:
+        return extracted or {}
+
+    user_lower = user_input.lower()
+    user_words = extract_words(user_input)
+    validated: dict[str, str] = {}
+
+    for key, value in extracted.items():
+        str_val = str(value).strip()
+        val_lower = str_val.lower()
+
+        # skip empty
+        if not str_val:
+            continue
+
+        # RULE 1: direct substring match -- value appears in user text
+        if val_lower in user_lower:
+            validated[key] = str_val
+            continue
+
+        # RULE 2: word overlap -- at least one significant word from the
+        # value appears in the user input
+        val_words = {w for w in extract_words(str_val) if len(w) > 2}
+        if val_words & user_words:
+            validated[key] = str_val
+            continue
+
+        # RULE 3: era inference -- if user said "sci-fi" and extractor
+        # produced era="futuristic", that's a valid inference
+        if key == "era":
+            era_key = val_lower
+            valid_sources = VALID_ERA_INFERENCES.get(era_key, set())
+            if any(src in user_lower for src in valid_sources):
+                validated[key] = str_val
+                continue
+
+        # RULE 4: numeric values -- if value is a number and it appears
+        # in the user text, accept it
+        if str_val.isdigit() and str_val in user_lower:
+            validated[key] = str_val
+            continue
+
+        # fact not grounded -- reject
+        logger.debug(
+            "extraction rejected: %s='%s' not grounded in user input",
+            key, str_val,
+        )
+
+    return validated
