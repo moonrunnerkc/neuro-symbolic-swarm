@@ -22,9 +22,14 @@ prompt: >
        NOT an era. A fantasy with swords and magic = era: medieval.
        A story with spaceships and AI = era: futuristic.
      - "timeline" for specific year or date (including in-world dates)
-     - "character_name" for character names
-     - "character_role" for what a character does
-     - "character_age" for character age
+     - "protagonist_name" for the main character's name
+     - "protagonist_age" for the main character's age
+     - "protagonist_role" for the main character's occupation/role
+     - "companion_name" for a secondary character's name
+     - "companion_age" for a secondary character's age
+     - "companion_role" for a secondary character's role/occupation
+     - "companion_relationship" for a secondary character's relationship
+       to the protagonist (e.g. "friend", "sister", "mentor")
      - "antagonist" for the main villain or opposition
   9. Do NOT use "location" for the story setting. Use "setting" instead.
      Only use "location" for where a character is in a specific scene.
@@ -36,8 +41,8 @@ prompt: >
   Input: "A fantasy campaign set in the Shattered Reach during the Third Age."
   Output: {"setting": "Shattered Reach", "genre": "fantasy", "era": "medieval", "timeline": "Third Age"}
 
-  Input: "The main character is a 30-year-old engineer named Sara."
-  Output: {"character_name": "Sara", "character_age": "30", "character_role": "engineer"}
+  Input: "The main character is a 30-year-old engineer named Sara. Her mentor is Dr. Voss, a 55-year-old physicist."
+  Output: {"protagonist_name": "Sara", "protagonist_age": "30", "protagonist_role": "engineer", "companion_name": "Dr. Voss", "companion_age": "55", "companion_role": "physicist", "companion_relationship": "mentor"}
 
   Input: "How are you today?"
   Output: {}

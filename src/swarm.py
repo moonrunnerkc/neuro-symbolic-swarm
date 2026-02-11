@@ -627,7 +627,9 @@ class SwarmChatbot:
         CHARACTER_PREDICATES = {
             "protagonist", "protagonist_age", "protagonist_name",
             "protagonist_role", "character_age", "character_role",
-            "character_name", "age", "role", "occupation",
+            "character_name", "companion_name", "companion_age",
+            "companion_role", "companion_relationship",
+            "age", "role", "occupation",
         }
 
         # collect world-grounding anchor values
@@ -743,8 +745,11 @@ class SwarmChatbot:
                                 f"{pred} is {val}, not {found_age}"
                             )
                 # check role/occupation contradictions
-                if pred in ("protagonist_role", "role", "occupation", "character_role"):
-                    # look for "always been a <role>" or "is a <role>" patterns
+                if pred in (
+                    "protagonist_role", "role", "occupation",
+                    "character_role", "companion_role",
+                ):
+                    # "always been a <role>" or "is a <role>" patterns
                     role_patterns = re.findall(
                         r"(?:always been|is|was) (?:a |an )(\w+)",
                         query_lower,
@@ -754,10 +759,15 @@ class SwarmChatbot:
                             contradictions.append(
                                 f"{pred} is '{val}', not '{found_role}'"
                             )
-                # check relationship contradictions: "his wife Margaux" vs "nun"
-                if pred in ("relationship", "protagonist_relationship", "companion_role"):
-                    relationship_words = {"wife", "husband", "lover", "girlfriend", "boyfriend"}
-                    for rw in relationship_words:
+                # check relationship contradictions:
+                # "his wife Margaux" when companion_relationship is "friend"
+                # or companion_role is "visiting nun"
+                if pred in (
+                    "companion_relationship", "protagonist_relationship",
+                    "relationship",
+                ):
+                    romantic_words = {"wife", "husband", "lover", "girlfriend", "boyfriend", "fiancee", "fiance"}
+                    for rw in romantic_words:
                         if rw in query_lower and rw not in val_lower:
                             contradictions.append(
                                 f"{pred} is '{val}', user claims '{rw}'"
