@@ -132,7 +132,12 @@ class StateManager:
     # predicates that define the world and cannot be overwritten once set.
     # the extractor often misclassifies scene details (e.g. "underneath ice")
     # as the world "setting", clobbering the real value. lock these after first write.
-    PROTECTED_PREDICATES: set[str] = {"setting", "genre", "era", "timeline", "planet"}
+    PROTECTED_PREDICATES: set[str] = {
+        # world-building (story context)
+        "setting", "genre", "era", "timeline", "planet",
+        # project identity (technical context)
+        "project_name", "programming_language", "database",
+    }
 
     def upsert(self, fact: Fact) -> str:
         """insert or update a fact. overwrites if same subject+predicate exists.

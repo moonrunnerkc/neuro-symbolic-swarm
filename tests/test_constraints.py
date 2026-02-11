@@ -173,6 +173,27 @@ class TestFindFactContradictions:
         c = find_fact_contradictions("in the year 1347", facts)
         assert len(c) == 0
 
+    # identity/project name checks
+    def test_project_name_contradiction(self):
+        facts = {"project_name": "Meridian"}
+        c = find_fact_contradictions("the project is called Horizon", facts)
+        assert any("Meridian" in x and "horizon" in x.lower() for x in c)
+
+    def test_project_name_match(self):
+        facts = {"project_name": "Meridian"}
+        c = find_fact_contradictions("the project is called Meridian", facts)
+        assert len(c) == 0
+
+    def test_language_contradiction(self):
+        facts = {"programming_language": "Rust"}
+        c = find_fact_contradictions("it's written in Java", facts)
+        assert any("Rust" in x and "java" in x.lower() for x in c)
+
+    def test_database_contradiction(self):
+        facts = {"database": "CockroachDB"}
+        c = find_fact_contradictions("we're using MySQL on a single node", facts)
+        assert any("CockroachDB" in x and "mysql" in x.lower() for x in c)
+
     # empty inputs
     def test_empty_query(self):
         c = find_fact_contradictions("", {"protagonist_age": "42"})

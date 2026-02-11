@@ -90,10 +90,14 @@ GENRE_ERA_MAP: dict[str, str] = {
 
 # -- world anchor keys --
 # predicates that define the thread's "world". changes to these are
-# high-severity; they're used for blocklist selection, setting enforcement.
+# high-severity; they're used for blocklist selection, setting enforcement,
+# and contradiction detection. covers both story and technical contexts.
 WORLD_ANCHOR_KEYS: set[str] = {
+    # story context
     "setting", "genre", "era", "timeline",
     "planet", "city", "country", "region",
+    # technical/project identity
+    "project_name", "programming_language", "database",
 }
 
 
@@ -219,6 +223,38 @@ def find_fact_contradictions(
                 if term in query_lower and term not in val_lower:
                     contradictions.append(
                         f"{pred} is '{val}', user claims '{term}'"
+                    )
+
+        # -- identity/name facts (project name, language, database, etc.) --
+        # detect "called X", "named X", "it's X", "written in X", "using X"
+        if pred in ("project_name", "programming_language", "database"):
+            # patterns: "called X", "named X"
+            name_patterns = re.findall(
+                r"(?:(?:is\s+)?called|named)\s+(\w[\w\s+#.-]{0,25}?)(?:[.,;!?]|$|\s+(?:and|but|with|using|on|in|for|not)\b)",
+                query_lower,
+            )
+            # "it's X" but NOT "it's written in" which is a lang pattern
+            its_patterns = re.findall(
+                r"it'?s\s+(?!written\b|built\b|using\b|running\b)(\w[\w\s+#.-]{0,25}?)(?:[.,;!?]|$|\s+(?:and|but|with|using|on|in|for|not)\b)",
+                query_lower,
+            )
+            # "written in X", "using X" for language/db
+            lang_db_patterns: list[str] = []
+            if pred in ("programming_language", "database"):
+                lang_db_patterns = re.findall(
+                    r"(?:written in|(?:we'?re\s+)?using|switched to)\s+(\w[\w\s+#.-]{0,25}?)(?:[.,;!?]|$|\s+(?:and|but|with|on|in|for|not)\b)",
+                    query_lower,
+                )
+            for found in name_patterns + its_patterns + lang_db_patterns:
+                found = found.strip()
+                if (
+                    found
+                    and len(found) > 1
+                    and found not in val_lower
+                    and val_lower not in found
+                ):
+                    contradictions.append(
+                        f"{pred} is '{val}', not '{found}'"
                     )
 
     return contradictions

@@ -923,18 +923,27 @@ class SwarmChatbot:
 
         # strip XML-style reasoning/thinking blocks that models emit
         # as chain-of-thought. these should never reach the user.
+        # handles both closed (<reasoning>...</reasoning>) and unclosed blocks
         answer = re.sub(
             r"<(?:reasoning|thinking|analysis|reflection)>.*?</(?:reasoning|thinking|analysis|reflection)>",
             "", answer, flags=re.DOTALL | re.IGNORECASE,
         )
-        # also catch unclosed reasoning blocks at the start
+        # unclosed reasoning at start or end of response
         answer = re.sub(
-            r"^<(?:reasoning|thinking|analysis|reflection)>.*?(?:</(?:reasoning|thinking|analysis|reflection)>|\n\n)",
+            r"<(?:reasoning|thinking|analysis|reflection)>.*",
             "", answer, flags=re.DOTALL | re.IGNORECASE,
         )
 
-        # strip [Source: ...] and [response] tags
-        answer = re.sub(r"\[(?:Source|response)[^\]]*\]", "", answer, flags=re.IGNORECASE)
+        # strip [Source: ...], [response], [Draft ...] tags
+        answer = re.sub(r"\[(?:Source|response|Draft)[^\]]*\]", "", answer, flags=re.IGNORECASE)
+
+        # strip "Candidate A/B/C:" scoring artifacts from the voting system
+        answer = re.sub(
+            r"\(Candidate\s+[A-Z]\)\.?", "", answer, flags=re.IGNORECASE,
+        )
+        answer = re.sub(
+            r"Candidate\s+[A-Z]:\s*", "", answer, flags=re.IGNORECASE,
+        )
 
         answer = answer.strip()
 
