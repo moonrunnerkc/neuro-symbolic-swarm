@@ -611,7 +611,20 @@ class SwarmChatbot:
         thread_id: str,
         query: str = "",
     ) -> list[SwarmMessage]:
-        """hard-reject drafts that contradict core world-building facts."""
+        """Hard-reject drafts that contradict core world-building facts.
+
+        Three layers of defense, all driven by the state ledger:
+        1. User-input anachronism scan (pre-check, blocks entire request)
+        2. User-input fact contradiction scan (ages, roles, relationships)
+        3. Draft-level anachronism + setting scan (per-draft filtering)
+        """
+        from src.constraints import (
+            WORLD_ANCHOR_KEYS,
+            find_anachronisms,
+            find_fact_contradictions,
+            get_blocklist,
+        )
+
         if not thread_id:
             return responses
 
@@ -619,102 +632,34 @@ class SwarmChatbot:
         if not facts:
             return responses
 
-        # only these predicates define the "world" -- scene-level facts
-        # like location=underneath_ice or event=first_sensing are NOT anchors
-        WORLD_ANCHOR_KEYS = {"setting", "genre", "era", "planet", "city", "country"}
-
-        # character-level predicates that should be enforced
-        CHARACTER_PREDICATES = {
-            "protagonist", "protagonist_age", "protagonist_name",
-            "protagonist_role", "character_age", "character_role",
-            "character_name", "companion_name", "companion_age",
-            "companion_role", "companion_relationship",
-            "age", "role", "occupation",
-        }
-
-        # collect world-grounding anchor values
+        # partition facts into world anchors vs all named facts
         anchors: dict[str, str] = {}
-        character_facts: dict[str, str] = {}
+        all_facts: dict[str, str] = {}
         for f in facts:
+            all_facts[f.predicate] = f.obj
             if f.predicate in WORLD_ANCHOR_KEYS:
                 anchors[f.predicate] = f.obj.lower()
-            # store ALL facts for character contradiction checking
-            character_facts[f.predicate] = f.obj
 
         if not anchors:
             return responses
 
-        # anachronism keywords by era -- if era=medieval and draft mentions
-        # modern tech, that's a hard contradiction
-        ERA_BLOCKLISTS: dict[str, set[str]] = {
-            "medieval": {
-                "truck", "pickup", "highway", "walmart", "tesla", "phone",
-                "computer", "internet", "car", "airplane", "motorcycle",
-                "skyscraper", "subway", "taxi", "uber", "amazon",
-                "supermarket", "mall", "electric", "battery", "robot",
-                "laptop", "smartphone", "wifi", "helicopter", "asphalt",
-                "freeway", "engine", "gasoline", "diesel", "radar",
-                "laser", "plasma", "neon", "digital", "hologram",
-                "android", "drone", "satellite", "microchip", "bluetooth",
-            },
-            "futuristic": {
-                "horse-drawn", "candle", "parchment", "quill", "feudal",
-                "peasant", "castle", "drawbridge", "catapult",
-            },
-        }
+        blocklist = get_blocklist(anchors)
 
-        # genre -> implied era mapping (fallback when extractor misses)
-        GENRE_ERA_MAP: dict[str, str] = {
-            "fantasy": "medieval",
-            "medieval": "medieval",
-            "sci-fi": "futuristic",
-            "cyberpunk": "futuristic",
-            "space opera": "futuristic",
-        }
-
-        # build the blocklist from era (direct or inferred from genre)
-        era = anchors.get("era", "")
-        blocklist = set()
-        for era_key, words in ERA_BLOCKLISTS.items():
-            if era_key in era:
-                blocklist = words
-                break
-
-        # fallback: infer era from genre if no direct match
-        if not blocklist:
-            genre = anchors.get("genre", "")
-            for genre_key, mapped_era in GENRE_ERA_MAP.items():
-                if genre_key in genre:
-                    blocklist = ERA_BLOCKLISTS.get(mapped_era, set())
-                    break
-
-        # setting anchor: the place name that should appear in grounded responses
+        # setting anchor: place names that grounded drafts should reference
         setting_values = set()
-        for key in ("setting", "planet", "city", "country"):
+        for key in ("setting", "planet", "city", "country", "region"):
             if val := anchors.get(key):
-                # split compound values like "shattered reach" into tokens too
                 setting_values.add(val)
                 for word in val.split():
-                    if len(word) > 3:  # skip trivial words
+                    if len(word) > 3:
                         setting_values.add(word)
 
-        # -- pre-check A: scan the USER'S INPUT for anachronisms --
-        # if the user typed "smartphone" in a medieval thread, reject
-        # immediately regardless of what the agents produce
-        if blocklist and query:
-            query_words = {
-                w.strip(".,!?;:\"'()[]{}")
-                for w in query.lower().split()
-            }
-            expanded_query = set()
-            for w in query_words:
-                expanded_query.add(w)
-                if "-" in w:
-                    expanded_query.update(w.split("-"))
-            user_anachronisms = blocklist & expanded_query
+        # -- pre-check A: user-input anachronism scan --
+        if query:
+            user_anachronisms = find_anachronisms(query, blocklist)
             if user_anachronisms:
                 logger.warning(
-                    "user input contains anachronisms: %s — hard rejecting",
+                    "user input contains anachronisms: %s",
                     user_anachronisms,
                 )
                 return [SwarmMessage(
@@ -729,101 +674,43 @@ class SwarmChatbot:
                     score=1.0,
                 )]
 
-        # -- pre-check B: scan USER'S INPUT for character fact contradictions --
-        # detect when user tries to rewrite established character facts
-        if query and character_facts:
-            query_lower = query.lower()
-            contradictions = []
-            for pred, val in character_facts.items():
-                val_lower = val.lower()
-                # check age contradictions: "who is 25 years old" vs established 42
-                if "age" in pred and val_lower.isdigit():
-                    age_matches = re.findall(r"\b(\d{1,3})\s*(?:years?\s*old|-year)", query_lower)
-                    for found_age in age_matches:
-                        if found_age != val_lower:
-                            contradictions.append(
-                                f"{pred} is {val}, not {found_age}"
-                            )
-                # check role/occupation contradictions
-                if pred in (
-                    "protagonist_role", "role", "occupation",
-                    "character_role", "companion_role",
-                ):
-                    # "always been a <role>" or "is a <role>" patterns
-                    role_patterns = re.findall(
-                        r"(?:always been|is|was) (?:a |an )(\w+)",
-                        query_lower,
-                    )
-                    for found_role in role_patterns:
-                        if found_role not in val_lower and val_lower not in found_role:
-                            contradictions.append(
-                                f"{pred} is '{val}', not '{found_role}'"
-                            )
-                # check relationship contradictions:
-                # "his wife Margaux" when companion_relationship is "friend"
-                # or companion_role is "visiting nun"
-                if pred in (
-                    "companion_relationship", "protagonist_relationship",
-                    "relationship",
-                ):
-                    romantic_words = {"wife", "husband", "lover", "girlfriend", "boyfriend", "fiancee", "fiance"}
-                    for rw in romantic_words:
-                        if rw in query_lower and rw not in val_lower:
-                            contradictions.append(
-                                f"{pred} is '{val}', user claims '{rw}'"
-                            )
-
+        # -- pre-check B: user-input fact contradiction scan --
+        if query:
+            contradictions = find_fact_contradictions(query, all_facts)
             if contradictions:
                 logger.warning(
-                    "user input contradicts character facts: %s",
-                    contradictions,
+                    "user input contradicts facts: %s", contradictions,
                 )
-                fact_summary = "; ".join(contradictions)
                 return [SwarmMessage(
                     source="StateAnchor",
                     content=(
                         f"That conflicts with established facts in this thread: "
-                        f"{fact_summary}. The state ledger is locked. "
-                        f"Please stay consistent with the established characters."
+                        f"{'; '.join(contradictions)}. The state ledger is locked. "
+                        f"Please stay consistent with the established world."
                     ),
                     score=1.0,
                 )]
 
+        # -- per-draft validation --
         valid: list[SwarmMessage] = []
-        hard_rejections = 0  # anachronism = hard, can't fall back
+        hard_rejections = 0
         for resp in responses:
             content_lower = resp.content.lower()
             contradicts = False
 
-            # check 1: anachronism scan -- modern words in a medieval draft
-            if blocklist:
-                # strip punctuation and split hyphenated compounds so
-                # "laser-precise" yields {"laser", "precise"}
-                raw_words = {
-                    w.strip(".,!?;:\"'()[]{}")
-                    for w in content_lower.split()
-                }
-                content_words: set[str] = set()
-                for w in raw_words:
-                    content_words.add(w)
-                    if "-" in w:
-                        content_words.update(w.split("-"))
-                found_anachronisms = blocklist & content_words
-                if found_anachronisms:
-                    contradicts = True
-                    hard_rejections += 1
-                    logger.info(
-                        "symbolic reject: draft from %s has anachronisms: %s",
-                        resp.source, found_anachronisms,
-                    )
-
-            # check 2: setting anchor -- substantial drafts should mention
-            # the world setting (but only reject if they describe a scene)
-            if not contradicts and setting_values and len(content_lower) > 80:
-                has_setting_ref = any(
-                    sv in content_lower for sv in setting_values
+            # check 1: anachronism scan on draft content
+            draft_anachronisms = find_anachronisms(resp.content, blocklist)
+            if draft_anachronisms:
+                contradicts = True
+                hard_rejections += 1
+                logger.info(
+                    "symbolic reject: draft from %s has anachronisms: %s",
+                    resp.source, draft_anachronisms,
                 )
-                if not has_setting_ref:
+
+            # check 2: setting anchor -- substantial scenes should reference it
+            if not contradicts and setting_values and len(content_lower) > 80:
+                if not any(sv in content_lower for sv in setting_values):
                     contradicts = True
                     logger.info(
                         "symbolic reject: draft from %s doesn't reference setting",
@@ -835,17 +722,11 @@ class SwarmChatbot:
 
         if not valid:
             if hard_rejections > 0:
-                # ALL drafts had anachronisms -- inject a refusal instead of
-                # falling back to the contradicting originals
                 logger.warning(
-                    "symbolic validation: all %d drafts had hard contradictions, "
-                    "injecting constraint-aware refusal",
+                    "symbolic validation: all %d drafts had hard contradictions",
                     len(responses),
                 )
-                constraint_block = self._state.constraint_block(
-                    thread_id, include_global=True,
-                )
-                refusal = SwarmMessage(
+                return [SwarmMessage(
                     source="StateAnchor",
                     content=(
                         f"The request conflicts with established facts for this thread. "
@@ -853,8 +734,7 @@ class SwarmChatbot:
                         f"Please rephrase your request to fit within the established setting."
                     ),
                     score=1.0,
-                )
-                return [refusal]
+                )]
             else:
                 logger.warning(
                     "symbolic validation rejected all drafts on soft checks, "
