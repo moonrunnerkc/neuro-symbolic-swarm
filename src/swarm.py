@@ -337,9 +337,6 @@ class SwarmChatbot:
                 metadata={"thread_id": thread_id, "type": "response"},
             ))
 
-        progress("done")
-        return final
-
     def _run_fact_extraction(self, query: str, thread_id: str) -> None:
         """dispatch the fact-extractor agent, parse triples, upsert to state ledger.
 
