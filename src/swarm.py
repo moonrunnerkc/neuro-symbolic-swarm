@@ -200,6 +200,54 @@ class SwarmChatbot:
             for f in self._state.query(thread_id, include_global=True)
         }
 
+        # -- GATE: validate user input BEFORE fact extraction --
+        # this prevents poisoned messages from corrupting the ledger.
+        # if the user sends anachronisms or contradicts locked facts,
+        # reject immediately without running the extractor or agents.
+        if pre_facts:
+            from src.constraints import (
+                WORLD_ANCHOR_KEYS,
+                find_anachronisms,
+                find_fact_contradictions,
+                get_blocklist,
+            )
+            anchors = {
+                k: v.lower() for k, v in pre_facts.items()
+                if k in WORLD_ANCHOR_KEYS
+            }
+            if anchors:
+                blocklist = get_blocklist(anchors)
+                user_anachronisms = find_anachronisms(query, blocklist)
+                if user_anachronisms:
+                    progress("blocked — anachronisms detected")
+                    WORLD_KEYS = {"setting", "genre", "era", "timeline"}
+                    world_summary = ", ".join(
+                        f"{k}={v}" for k, v in pre_facts.items()
+                        if k in WORLD_KEYS
+                    )
+                    final = (
+                        f"That request conflicts with the established world for this thread. "
+                        f"The current setting is: {world_summary}. "
+                        f"Your message contains terms ({', '.join(sorted(user_anachronisms))}) "
+                        f"that don't belong in this setting. "
+                        f"Please rephrase your request to fit within the established setting."
+                    )
+                    self._record_exchange(query, final, thread_id)
+                    progress("done")
+                    return final
+
+                fact_contradictions = find_fact_contradictions(query, pre_facts)
+                if fact_contradictions:
+                    progress("blocked — contradicts established facts")
+                    final = (
+                        f"That conflicts with established facts in this thread: "
+                        f"{'; '.join(fact_contradictions)}. The state ledger is locked. "
+                        f"Please stay consistent with the established world."
+                    )
+                    self._record_exchange(query, final, thread_id)
+                    progress("done")
+                    return final
+
         # phase 1a: fact extraction -- runs alongside answerers
         progress("extracting facts")
         self._run_fact_extraction(query, thread_id)
@@ -263,21 +311,28 @@ class SwarmChatbot:
 
         # record in thread with timestamps
         progress("saving to thread")
+        self._record_exchange(query, final, thread_id)
+
+        progress("done")
+        return final
+
+    def _record_exchange(self, query: str, response: str, thread_id: str) -> None:
+        """save a query/response pair to thread history and memory."""
         now = time.time()
         self._active_threads[thread_id].append({
             "role": "user", "content": query, "timestamp": now,
         })
         self._active_threads[thread_id].append({
-            "role": "swarm", "content": final, "timestamp": now,
+            "role": "swarm", "content": response, "timestamp": now,
         })
         self._save_thread(thread_id)
 
         # store in memory
-        if final.strip() and not final.startswith("no agents"):
-            resp_vec = embed_text(final)
+        if response.strip() and not response.startswith("no agents"):
+            resp_vec = embed_text(response)
             self._memory.upsert(MemoryEntry(
                 key=f"resp-{uuid.uuid4().hex[:8]}",
-                text=final,
+                text=response,
                 embedding=resp_vec,
                 metadata={"thread_id": thread_id, "type": "response"},
             ))
