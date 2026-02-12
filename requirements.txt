@@ -6,8 +6,8 @@
 #   pip install --pre torch torchvision torchaudio \
 #     --index-url https://download.pytorch.org/whl/nightly/cu128
 
-# gpu inference
-vllm>=0.15.0
+# gpu inference -- models served via Ollama (https://ollama.com)
+# no direct inference library needed; ollama handles model loading
 
 # embeddings + vector store
 sentence-transformers>=2.2.0

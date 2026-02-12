@@ -1,14 +1,14 @@
 # Contributing to Swarm Chatbot
 
-Thanks for wanting to contribute. Here's how to do it without breaking things.
+Thanks for your interest. Here is how to contribute without breaking things.
 
 ## Ground Rules
 
-- This project runs **fully offline**. Don't introduce dependencies that phone home.
-- All code targets **Python 3.10+** on Ubuntu 22.04.
-- GPU assumptions: RTX 5070 (12GB VRAM). Don't add features that assume datacenter hardware.
+- This project runs fully offline. Do not introduce dependencies that phone home.
+- All code targets Python 3.10+ on Linux.
+- GPU budget: 12GB VRAM. Do not add features that assume datacenter hardware.
 
-## Getting Started
+## Setup
 
 ```bash
 git clone git@github.com:moonrunnerkc/swarm-chatbot.git
@@ -17,7 +17,7 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Pull the models if you plan to run integration tests:
+Pull models if you plan to run integration tests:
 
 ```bash
 ollama pull phi3:mini
@@ -27,35 +27,34 @@ ollama pull dolphin-llama3:8b
 
 ## Code Style
 
-- **PEP 8** with `ruff` or `black` formatting.
-- **Snake_case** for functions and variables, **PascalCase** for classes.
-- **Type hints** on all public functions.
-- **Docstrings** should be short and casual. Explain *why*, not *what*.
+- PEP 8 formatting. Use `ruff` or `black`.
+- `snake_case` for functions and variables, `PascalCase` for classes, `ALL_CAPS` for constants.
+- Type hints on all public functions.
+- Docstrings: short, casual, explain why not what.
 - Comments: lowercase, pragmatic. No filler.
 - Imports: standard library first, third-party second, local third. No unused imports.
-- Constants: `ALL_CAPS`.
 
 ## Agent Configs
 
-Agent behavior lives in `agents/*.yaml`. If you're adding or modifying an agent:
+Agent behavior lives in `agents/*.yaml`. If you add or modify an agent:
 
 - Keep the YAML structure consistent with existing configs.
-- Set a reasonable `max_tokens` cap (256 default for most agents).
+- Set a reasonable `max_tokens` cap.
 - Test that the agent loads and responds before opening a PR.
 
 ## Testing
 
-Every behavior change needs a test. No exceptions.
+Every behavior change needs a test.
 
 ```bash
-# unit tests
+# unit tests (no GPU or Ollama needed)
 pytest tests/ -v --tb=short
 
-# live integration (requires ollama + models)
+# live integration (requires Ollama + models running)
 python -m tests.integration_live
 ```
 
-Don't submit PRs with failing tests.
+Do not submit PRs with failing tests.
 
 ## Pull Requests
 
@@ -65,20 +64,19 @@ Don't submit PRs with failing tests.
 4. Make sure `pytest tests/ -v` passes locally before pushing.
 5. No stubs, no `pass` placeholders, no `TODO` comments in submitted code.
 
-## What We're Looking For
+## Good Contributions
 
-Check the README roadmap for ideas. High-value contributions right now:
+Check the README roadmap. High-value work right now:
 
-- RAG document upload for the Retriever agent
+- RAG document uploads for the Retriever agent
 - Dual-GPU support for parallel model hosting
 - Live State Ledger view in the UI
 
-## What We Don't Want
+## What We Do Not Want
 
-- Cloud/API dependencies
-- UI framework swaps (we're committed to PyQt6)
-- "Improvements" that add complexity without measurable benefit
-- Generated boilerplate or AI-typical code patterns
+- Cloud or API dependencies
+- UI framework changes (committed to PyQt6)
+- Complexity without measurable benefit
 
 ## Reporting Bugs
 
@@ -88,7 +86,6 @@ Open an issue with:
 - What you expected
 - What actually happened
 - Your GPU, OS, and Python version
-- Relevant logs from `data/logs.json` if applicable
 
 ## License
 
