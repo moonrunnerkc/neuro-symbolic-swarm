@@ -9,7 +9,7 @@
 
 # Swarm Chatbot
 
-**Seven LLM agents. One GPU. Zero cloud.**
+**Neuro-Symbolic Multi-Agent Orchestration Engine**
 
 *Author: Bradley R. Kinnard*
 
@@ -17,180 +17,175 @@
 
 <br/>
 
-> **What you're looking at:** This is a research prototype, not a product. The chatbot is just one skin on top of a general-purpose multi-agent orchestration engine. That same engine -- the agent dispatch loop, the scored voting, the symbolic validation, the FAISS memory -- could be wired up to a code reviewer, a document QA system, or anything else where you want multiple models to argue about an answer before the user ever sees it. The chatbot is the test harness.
+> **The Architectural Thesis:** This is a research prototype built to study the "Context Drift" and "Hallucination" problems that plague single-model systems. While it looks like a chatbot, it is really a test harness for a deterministic state engine. The core question: *can a 7-agent consensus network running on a single consumer GPU (12 GB VRAM) produce more consistent, fact-stable output than a lone model?* The answer, based on 256 automated tests and adversarial attack simulations, is a qualified yes. The system makes real trade-offs to get there. This document lays out what works, what breaks, and where the boundaries are.
 
 ---
 
 ## Table of Contents
 
-- [How It Works](#how-it-works)
-- [Architecture Diagram](#architecture-diagram)
-- [Using Your Own Models](#using-your-own-models)
-- [Quick Start](#quick-start)
+- [Core Architecture](#core-architecture)
+- [Key Innovations](#key-innovations)
+- [System Design](#system-design)
+- [Local Deployment](#local-deployment)
+- [Adversarial Testing](#adversarial-testing)
+- [Test Suite](#test-suite)
 - [Programmatic API](#programmatic-api)
 - [Configuration](#configuration)
-- [Test Results](#test-results)
 - [Project Layout](#project-layout)
-- [Requirements](#requirements)
-- [Known Limitations](#known-limitations)
+- [Limitations and Trade-offs](#limitations-and-trade-offs)
 - [Roadmap](#roadmap)
 
 ---
 
-## How It Works
+## Core Architecture
 
-Seven specialized agents each take a crack at your input. Their drafts are scored against your original query using cosine similarity on 384-dimensional sentence embeddings (`all-MiniLM-L6-v2`, runs on CPU). Anything below the quality threshold gets cut. The survivors go through a symbolic validation layer that cross-checks against a persistent fact ledger. A synthesizer agent then folds the validated drafts into one coherent answer.
+This system does not simply "chat." It treats conversation as a data processing pipeline where seven agents compete to generate the best response, and a symbolic logic layer vetoes anything that contradicts established facts.
 
-Three things make this different from a typical single-model chatbot wrapper:
+The pipeline in four steps:
 
-### 1. The State Ledger
+1. **Parallel Drafting.** Four agents (Parser, Retriever, Innovator, Reasoner) each generate an independent draft in response to the user's query. Agents sharing a model are batched to avoid doubling the KV cache in VRAM.
 
-A small dedicated model (`phi3:mini`) watches every message and pulls out concrete facts (names, dates, locations, roles, relationships) as flat JSON. Those facts go into `data/world_state.json`. Eight predicates are write-locked after first contact:
+2. **Vector Scoring.** Each draft is scored against the original query using `all-MiniLM-L6-v2` (384-d embeddings, cosine similarity, CPU). Drafts below the quality threshold (default: 0.21) are culled immediately.
+
+3. **Symbolic Validation.** Survivors are cross-checked against an immutable State Ledger. Any draft containing anachronisms, fact contradictions, or setting violations is physically rejected before synthesis. If every draft fails, the ledger rolls back to its pre-message state.
+
+4. **Synthesis.** A final agent folds the validated drafts into one coherent response. The synthesizer receives a constraint block listing all locked facts from the ledger, forcing it to stay within bounds.
+
+---
+
+## Key Innovations
+
+### 1. Neuro-Symbolic State Ledger
+
+Most retrieval-augmented systems rely on vector similarity, which is probabilistic. Swarm adds a deterministic layer on top.
+
+**The Mechanism:** A dedicated lightweight model (`phi3:mini`) acts strictly as a fact extractor. It watches every message for concrete entities (dates, locations, names, tech stacks, relationships) and commits them as flat JSON to `data/world_state.json`. Eight predicates are write-locked after first contact:
 
 ```
-setting  genre  era  timeline  planet  project_name  programming_language  database
+setting   genre   era   timeline   planet   project_name   programming_language   database
 ```
 
-Once the ledger records `era=medieval`, that value is sealed. No later message can overwrite it. This is what prevents the slow drift you get in long conversations where the model gradually forgets what it established three pages ago.
+**The Result:** Once the ledger records `era=medieval`, that value is sealed for the life of the thread. No subsequent hallucination, no creative drift, and no user trick can overwrite it through the normal pipeline. The system creates a "truth anchor" that persists across the entire conversation.
 
-*Source: `PROTECTED_PREDICATES` in [src/state_manager.py, line 136](src/state_manager.py#L136)*
+**The Escape Hatch:** Protected predicates are locked against *accidental overwrites from extraction*, not against deliberate resets. The `clear_thread()` method wipes all facts for a thread (including locked ones), and the `delete()` method can remove individual predicates programmatically. If a user genuinely needs to pivot ("Actually, make this a time-travel story"), they start a new thread or the application calls `clear_thread()`.
 
-### 2. Hard Gating
+*Source: `PROTECTED_PREDICATES` in `src/state_manager.py`, line 136. Escape hatch: `clear_thread()` at line 203, `delete()` at line 192.*
 
-Every draft passes through `_symbolic_validate()` before synthesis. Three layers of defense:
+### 2. Hard Gating and Rollback
 
-| Layer | What It Catches | Example |
+The system implements defense-in-depth against hallucination. This happens in two stages: once on the raw user input (before any agents run), and again on all generated drafts.
+
+**The Mechanism:** Every draft passes through `_symbolic_validate()`. It scans for three categories of violations:
+
+| Check | What It Catches | Example |
 |:------|:----------------|:--------|
 | Anachronism scan | Terms that violate the era blocklist | "truck" in a medieval setting |
-| Fact contradiction check | Claims that conflict with locked predicates | Saying the database is MySQL when the ledger says CockroachDB |
-| Setting anchor enforcement | Drafts that ignore the established world | A long scene set in space when the ledger says `planet=Earth` |
+| Fact contradiction | Claims that conflict with locked predicates | Saying `database=MySQL` when the ledger says `CockroachDB` |
+| Setting anchor breach | Content that ignores the established world | A scene in outer space when the ledger says `planet=Earth` |
 
-Failing drafts are physically rejected and never reach the synthesizer. If every draft fails, the engine rolls back any facts the extractor pulled from that message, restoring the ledger to its pre-message state.
+**The Result:** Failing drafts are discarded before the synthesizer sees them. If *all* drafts fail validation, the engine triggers a state rollback: any facts the extractor pulled from the offending message are stripped from the ledger, restoring it to the pre-message baseline.
 
-The medieval era blocklist alone has **85 terms** -- everything from "truck" and "computer" to "tesla", "drone", and "satellite".
+The medieval era blocklist contains **104 unique terms** spanning transportation, electronics, modern weapons, energy/industrial tech, brand names, media, science, and materials. Multi-word entries like "machine gun" and "social media" match as substrings.
 
-*Source: `ERA_BLOCKLISTS["medieval"]` in [src/constraints.py, line 21](src/constraints.py#L21)*
+*Source: `ERA_BLOCKLISTS["medieval"]` in `src/constraints.py`, line 21. Rollback: `_rollback_facts()` in `src/swarm.py`.*
 
-### 3. VRAM-Safe Execution
+### 3. VRAM-Safe Concurrency
 
-Agents are grouped by model name. Each round runs one agent per model in parallel -- different models can sit in VRAM simultaneously. The engine never fires two requests at the same model at once, which would double the KV cache and risk OOM on a 12 GB card. After drafting finishes, all non-synthesizer models are unloaded via Ollama's `keep_alive: 0` flag before the synthesizer runs.
+Running 7 agents on one GPU normally requires datacenter hardware. Swarm solves this with model-based batching.
 
-*Source: `_run_agents()` at [src/swarm.py, line 553](src/swarm.py#L553); `_unload_model()` at [src/swarm.py, line 637](src/swarm.py#L637)*
+**The Mechanism:** Agents are grouped by their underlying model name. The engine runs one agent per model concurrently (different models can coexist in VRAM), but never sends two requests to the same model at the same time. After the drafting phase, all non-synthesizer models are explicitly unloaded via Ollama's `keep_alive: 0` endpoint before synthesis begins.
 
----
+**The Result:** The full pipeline runs on a standard NVIDIA card with 12 GB VRAM. Three agents sharing `dolphin-mistral:7b` load the model once. The engine avoids double-loading the KV cache, which would OOM on consumer hardware.
 
-## Architecture Diagram
-
-```
-User Input
-    |
-    +-----> [Fact-Extractor]  ------>  State Ledger (world_state.json)
-    |          phi3:mini                       |
-    v                                          v
-[Parser]  [Retriever]  [Innovator]        [Reasoner]
-   dolphin-mistral:7b x3              dolphin-llama3:8b x1
-    |         |            |               |
-    +----+----+------+-----+------+--------+
-         |           |            |
-         v           v            v
-     Scored Drafts (384-d cosine similarity gate)
-         |
-         v
-  [Symbolic Validation] <--- State Ledger
-         |                     hard reject anachronisms
-         |                     enforce locked predicates
-         v
-     [Critic] <--- embedding similarity (secondary signal)
-    dolphin-mistral:7b
-         |
-         v
-  [Synthesizer] <--- Constraint Block from Ledger
-    dolphin-llama3:8b
-         |
-     Final Answer
-```
-
-### Memory Architecture
-
-The engine maintains three distinct memory layers:
-
-| Layer | Kind | Backing Store | What It Holds |
-|:------|:-----|:--------------|:--------------|
-| Episodic | Thread-local | `data/threads/*.json` | Raw message history, per conversation |
-| Semantic | Vector | `data/memory.faiss` + `memory.json` | 384-d embeddings via `IndexFlatIP`, cosine retrieval |
-| Procedural | Symbolic | `data/world_state.json` | Extracted facts, locked predicates, world constraints |
-
-The FAISS index stores up to 200 entries (`MAX_ENTRIES` in [src/memory.py, line 60](src/memory.py#L60)). The embedding model (`all-MiniLM-L6-v2`) auto-downloads on first launch and runs entirely on CPU.
+*Source: `_run_agents()` at `src/swarm.py`, line 553. `_unload_model()` at line 637.*
 
 ---
 
-## Using Your Own Models
+## System Design
 
-The engine talks to Ollama over HTTP at `localhost:11434`. The call goes to `POST /api/generate` with a simple JSON payload: model name, prompt, system message, temperature, and token cap. Any model Ollama can serve will work. You control which model each agent uses by editing one line in a YAML file.
+### Pipeline
 
-### Step 1 -- Pull a model
+```mermaid
+graph TD
+    A["User Input"] --> B["Fact-Extractor<br/>(phi3:mini)"]
+    B --> C[("State Ledger<br/>world_state.json")]
+    A --> D{"Dispatcher"}
 
-```bash
-ollama pull llama3.1:8b
-ollama pull mistral:7b
-ollama pull gemma2:9b
-ollama pull qwen2.5:7b
-ollama pull deepseek-r1:8b
+    subgraph draft ["Parallel Drafting (VRAM-Grouped)"]
+        D --> E["Parser<br/>(dolphin-mistral:7b)"]
+        D --> F["Retriever<br/>(dolphin-mistral:7b)"]
+        D --> G["Innovator<br/>(dolphin-llama3:8b)"]
+        D --> H["Reasoner<br/>(dolphin-llama3:8b)"]
+    end
+
+    E & F & G & H --> I{"Cosine Scoring<br/>threshold ≥ 0.21"}
+    I -->|"Pass"| J{"Symbolic Validator"}
+    I -->|"Fail"| K["Discarded"]
+    C --> J
+
+    J -->|"Pass"| L["Critic<br/>(dolphin-mistral:7b)"]
+    J -->|"Reject"| M["Rollback + Discard"]
+
+    L --> N["Synthesizer<br/>(dolphin-llama3:8b)"]
+    N --> O["Final Response"]
+
+    style C fill:#2d5016,stroke:#4a8c2a,color:#fff
+    style J fill:#8b4513,stroke:#cd853f,color:#fff
+    style N fill:#1a1a5c,stroke:#4040b0,color:#fff
 ```
 
-Full catalog at [ollama.com/library](https://ollama.com/library). Under 8B fits comfortably on 12 GB cards. 13B+ needs 16 GB or a quantized build (Q4_K_M, Q5_K_M).
+### Agent Roster
 
-### Step 2 -- Edit the YAML
+| Agent | Default Model | Temp | Tokens | Threshold | Role |
+|:------|:-------------|:----:|:------:|:---------:|:-----|
+| Parser | `dolphin-mistral:7b` | 0.30 | 2048 | 0.15 | Direct answers with constraint checking |
+| Retriever | `dolphin-mistral:7b` | 0.20 | 2048 | 0.15 | Factual recall, memory-backed search |
+| Critic | `dolphin-mistral:7b` | 0.15 | 2048 | 0.15 | Contradiction detection, draft verification |
+| Innovator | `dolphin-llama3:8b` | 0.50 | 2048 | 0.10 | Lateral thinking, creative alternatives |
+| Reasoner | `dolphin-llama3:8b` | 0.20 | 2048 | 0.10 | Step-by-step chain-of-thought logic |
+| Synthesizer | `dolphin-llama3:8b` | 0.20 | 2048 | 0.10 | Combines validated drafts into final output |
+| Fact-Extractor | `phi3:mini` | 0.10 | 512 | 0.00 | JSON fact extraction for the state ledger |
 
-Every agent lives in its own file under `agents/`. Open it and change the `model:` line:
+*Values pulled directly from each `agents/*.yaml` file.*
 
-```yaml
-# agents/reasoner.yaml
-role: Reasoner
-model: dolphin-llama3:8b    # change this to your model
-prompt: >
-  You are a reasoning engine...
-max_tokens: 2048
-temperature: 0.2
-score_threshold: 0.1
+### Memory Hierarchy
+
+The engine maintains three memory layers that loosely mirror human cognitive architecture:
+
+```mermaid
+graph LR
+    subgraph episodic ["Episodic (Thread-Local)"]
+        E["threads/*.json<br/>Linear message history"]
+    end
+    subgraph semantic ["Semantic (Vector)"]
+        S["FAISS IndexFlatIP<br/>384-d embeddings<br/>200 entry cap"]
+    end
+    subgraph procedural ["Procedural (Symbolic)"]
+        P["world_state.json<br/>Locked predicates<br/>Constraint rules"]
+    end
+
+    E --> Agent["Agent Pipeline"]
+    S --> Agent
+    P --> Agent
+
+    style episodic fill:#1a3a5c,stroke:#4a8ab0,color:#fff
+    style semantic fill:#3a1a5c,stroke:#8a4ab0,color:#fff
+    style procedural fill:#2d5016,stroke:#4a8c2a,color:#fff
 ```
 
-That one field is the only thing you need to touch. Swap it to whatever you pulled:
+| Layer | Type | Store | Function |
+|:------|:-----|:------|:---------|
+| Episodic | Thread-local | `data/threads/*.json` | Raw linear history of each conversation |
+| Semantic | Vector | `data/memory.faiss` + `.json` | Long-term recall via cosine similarity. Stores up to 200 high-value embeddings (`IndexFlatIP`). |
+| Procedural | Symbolic | `data/world_state.json` | The rulebook. Extracted facts, locked predicates, world constraints. |
 
-```yaml
-model: llama3.1:8b
-```
-
-### Step 3 -- Restart
-
-Kill the app, run `python run.py` again. Done.
-
-### The agents and their defaults
-
-| Agent | Ships With | Temp | Tokens | Threshold | What It Does |
-|:------|:-----------|:----:|:------:|:---------:|:-------------|
-| Parser | `dolphin-mistral:7b` | 0.3 | 2048 | 0.15 | Direct answers, constraint checking |
-| Retriever | `dolphin-mistral:7b` | 0.2 | 2048 | 0.15 | Factual recall, memory search |
-| Critic | `dolphin-mistral:7b` | 0.15 | 2048 | 0.15 | Verification, contradiction detection |
-| Innovator | `dolphin-llama3:8b` | 0.5 | 2048 | 0.1 | Lateral thinking, creative angles |
-| Reasoner | `dolphin-llama3:8b` | 0.2 | 2048 | 0.1 | Step-by-step chain-of-thought |
-| Synthesizer | `dolphin-llama3:8b` | 0.2 | 2048 | 0.1 | Combines validated drafts into final output |
-| Fact-Extractor | `phi3:mini` | 0.1 | 512 | 0.0 | JSON fact extraction for the state ledger |
-
-*Source: each `agents/*.yaml` file. Values verified 2026-02-11.*
-
-### Practical notes
-
-- **VRAM math.** The engine runs one agent per unique model at the same time. Three agents sharing `dolphin-mistral:7b` only load it once. But four agents on four different 8B models means all four are in VRAM concurrently. Plan accordingly.
-- **Fact-Extractor needs a small, fast model.** It fires on every single message and only outputs JSON. Big creative models tend to ramble instead of producing valid JSON. `phi3:mini`, `qwen2.5:1.5b`, or `gemma2:2b` are good picks.
-- **Temperature controls personality.** 0.1 to 0.3 for precision work (extraction, verification). 0.4 to 0.7 for creative agents. The Innovator ships at 0.5 for a reason.
-- **GGUF files work.** Write an Ollama Modelfile (there is a working example in the repo root that builds from `dolphin-llama3:8b` with an 8192-token context window), run `ollama create my-model -f Modelfile`, reference `my-model` in the YAML.
+The embedding model (`all-MiniLM-L6-v2`, 384 dimensions) auto-downloads on first launch and runs entirely on CPU.
 
 ---
 
-## Quick Start
+## Local Deployment
 
-### 1. Clone and install
+### 1. Installation
 
 ```bash
 git clone https://github.com/moonrunnerkc/swarm-chatbot.git
@@ -199,17 +194,52 @@ python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Pull models
+### 2. Model Provisioning (Ollama)
+
+The system is model-agnostic via Ollama's HTTP API, but ships tuned for these defaults:
+
+- **Logic/Extraction:** `phi3:mini` (fast structured JSON output, low VRAM)
+- **Drafting/Critique:** `dolphin-mistral:7b` (instruction-following, precise)
+- **Synthesis:** `dolphin-llama3:8b` (better prose cohesion)
 
 ```bash
-ollama pull phi3:mini           # fact extraction
-ollama pull dolphin-mistral:7b  # parser, retriever, critic
-ollama pull dolphin-llama3:8b   # innovator, reasoner, synthesizer
+ollama pull phi3:mini
+ollama pull dolphin-mistral:7b
+ollama pull dolphin-llama3:8b
 ```
 
-Or swap in any models you want. See [Using Your Own Models](#using-your-own-models).
+Full model catalog at [ollama.com/library](https://ollama.com/library).
 
-### 3. Launch
+### 3. Swapping Models
+
+Every agent reads its model name from a YAML file in `agents/`. To swap any agent to a different model, edit that one line:
+
+```yaml
+# agents/reasoner.yaml
+role: Reasoner
+model: dolphin-llama3:8b    # change this to any Ollama model
+prompt: >
+  You are a reasoning engine...
+max_tokens: 2048
+temperature: 0.2
+score_threshold: 0.1
+```
+
+Replace the model field and restart:
+
+```bash
+ollama pull llama3.1:8b      # grab the model
+# edit agents/reasoner.yaml -> model: llama3.1:8b
+python run.py                # restart
+```
+
+**VRAM math:** Three agents sharing `dolphin-mistral:7b` load it once. Four agents on four different 8B models means all four in VRAM at the same time. Plan accordingly.
+
+**Fact-Extractor warning:** This agent fires on every single message and must produce strict JSON. Large creative models tend to ramble instead of outputting valid JSON, which breaks the state ledger pipeline. Keep this on a small, fast model: `phi3:mini`, `qwen2.5:1.5b`, or `gemma2:2b`.
+
+**GGUF support:** Write an Ollama Modelfile (working example included in the repo root, builds from `dolphin-llama3:8b` with an 8192 context window), run `ollama create my-model -f Modelfile`, and reference `my-model` in the agent YAML.
+
+### 4. Launch
 
 ```bash
 python run.py
@@ -217,43 +247,86 @@ python run.py
 
 ---
 
+## Adversarial Testing
+
+This is not "happy path" testing. The adversarial suite is designed to break the validation layer.
+
+Run: `pytest tests/test_adversarial_logic.py -v`
+
+| Attack Vector | Description | Outcome | Mechanism |
+|:--------------|:------------|:-------:|:----------|
+| Compound word bypass | Input "laser-precise hammer" in medieval context to hide "laser" | **Blocked** | Hyphen splitting exposes the root term; hits the 104-term blocklist |
+| Predicate overwrite | Set `planet=Mars`, then attempt `planet=Earth` | **Blocked** | `PROTECTED_PREDICATES` silently drops the second write |
+| Semantic drift | Wrap modern tech ("engines roar on the highway") in archaic prose | **Blocked** | Substring matching catches "engine" and "highway" regardless of surrounding style |
+| Ledger poisoning | Inject false facts that contradict established lore, trigger rollback | **Restored** | `_rollback_facts()` strips all post-snapshot predicates; baseline intact |
+| Multi-vector scatter | "smartphone", "wifi", "helicopter" scattered through a medieval draft | **Blocked** | All three terms hit the blocklist; every draft hard-rejected |
+
+*Source: `tests/test_adversarial_logic.py`*
+
+---
+
+## Test Suite
+
+256 tests across 11 files. Every test runs fully offline. No Ollama, no GPU, no network required.
+
+```
+$ pytest tests/ -v --tb=short
+256 passed in 7.66s
+```
+
+| File | Count | Coverage |
+|:-----|:-----:|:---------|
+| `test_constraints.py` | 52 | Era blocklists, genre inference, anachronism detection, fact contradiction patterns, extraction validation |
+| `test_structure.py` | 49 | File manifest integrity, YAML schema validation, module presence |
+| `test_swarm.py` | 36 | Orchestrator lifecycle, symbolic validation, constraint injection, rollback, user-input gate |
+| `test_persistent_memory.py` | 29 | Embedding round-trips, FAISS persistence across restarts, config compatibility |
+| `test_state_manager.py` | 23 | Ledger CRUD, disk persistence, concurrency, pruning, protected predicate enforcement |
+| `test_web_search.py` | 19 | Query classification, grounding block formatting, search query extraction |
+| `test_config.py` | 15 | Pydantic model validation, defaults, override behavior |
+| `test_agent.py` | 12 | Message serialization, agent lifecycle, status tracking |
+| `test_memory.py` | 11 | FAISS upsert, search, delete, reload, max-entry pruning (200 cap) |
+| `test_embedder.py` | 5 | 384-d output, L2 normalization, deterministic repeated calls |
+| `test_adversarial_logic.py` | 5 | See [Adversarial Testing](#adversarial-testing) above |
+
+---
+
 ## Programmatic API
 
-Skip the UI entirely:
+The architecture is decoupled from the UI. `SwarmChatbot` works as a standalone library.
 
 ```python
 from src.swarm import SwarmChatbot
 
 swarm = SwarmChatbot()
-thread = swarm.create_thread("test-run")
+thread = swarm.create_thread("research-01")
 
-reply = swarm.respond("The year is 2099. We are on Mars.", thread)
-print(reply)
+response = swarm.respond("The year is 2099. We are on Mars.", thread)
+print(response)
+
+# inspect the state ledger
+status = swarm.get_status()
+print(status["ledger"])
 
 swarm.close()
 ```
 
-### Public methods
-
 | Method | What It Does |
 |:-------|:-------------|
 | `create_thread(id)` | Start a new conversation thread |
-| `respond(query, thread_id)` | Run the full agent pipeline, return a single answer |
+| `respond(query, thread_id)` | Run the full dispatch/vote/validate loop, return one answer |
 | `add_agent(config)` | Hot-add an agent at runtime |
 | `remove_agent(role)` | Drop an agent by role name |
 | `get_status()` | Agent states, memory stats, ledger summary |
-| `get_thread_history(id)` | Pull the raw message log for a thread |
-| `clear_memory()` | Wipe the FAISS index and the state ledger |
-| `clear_all_threads()` | Delete every thread's history |
-| `close()` | Graceful shutdown, persists all state to disk |
-
-*Source: all methods confirmed in [src/swarm.py](src/swarm.py). `clear_all_threads()` at line 1159.*
+| `get_thread_history(id)` | Pull raw message log for a thread |
+| `clear_memory()` | Wipe the FAISS index and state ledger |
+| `clear_all_threads()` | Delete all thread history files |
+| `close()` | Graceful shutdown, persists state to disk |
 
 ---
 
 ## Configuration
 
-All runtime settings live in `data/config.json`:
+Runtime settings live in `data/config.json`:
 
 ```json
 {
@@ -274,56 +347,14 @@ All runtime settings live in `data/config.json`:
 
 | Key | What It Controls |
 |:----|:-----------------|
-| `score_threshold` | Minimum cosine similarity (0.0 to 1.0) a draft needs to survive into synthesis. Ships at 0.21. |
-| `max_tokens` | Per-agent response cap. Overridden per-agent in the YAML if set there. |
-| `context_window` | How many past messages get injected as context for each agent call. |
+| `score_threshold` | Cosine similarity floor (0.0 to 1.0). Drafts below this are cut. Ships at 0.21. |
+| `max_tokens` | Per-agent response cap. Overridden per-agent in the YAML when set there. |
+| `context_window` | How many past messages get injected as context per agent call. |
 | `default_model` | Fallback if an agent YAML omits its `model:` field. |
 | `auto_save_interval` | Seconds between automatic FAISS persistence to disk. |
-| `web_search_enabled` | Enables Tavily-powered web grounding. Requires a `TAVILY_API_KEY` in `.env`. Off by default. |
+| `web_search_enabled` | Enables Tavily-powered web grounding. Requires `TAVILY_API_KEY` in `.env`. Off by default. |
 
-*Source: `AppConfig` in [src/config.py, line 42](src/config.py#L42). 12 fields total.*
-
----
-
-## Test Results
-
-256 tests across 11 files. Every test runs offline. No Ollama instance, no GPU, no network access needed.
-
-```
-$ pytest tests/ -v --tb=short
-
-256 passed in 7.66s
-```
-
-### Breakdown by file
-
-| File | Count | Coverage |
-|:-----|:-----:|:---------|
-| `test_constraints.py` | 52 | Era blocklists, genre inference, anachronism detection, fact contradiction patterns (age, role, relationship, timeline, identity), extraction validation |
-| `test_structure.py` | 49 | File manifest integrity, YAML schema validation, module presence checks |
-| `test_swarm.py` | 36 | Orchestrator lifecycle, symbolic validation, fact extraction, constraint injection, ledger rollback, user-input anachronism gate |
-| `test_persistent_memory.py` | 29 | Embedding round-trips, FAISS persistence across restarts, config compatibility |
-| `test_state_manager.py` | 23 | Ledger CRUD, disk persistence, thread-safe concurrency, pruning, protected predicate enforcement |
-| `test_web_search.py` | 19 | Query classification, grounding block formatting, search query extraction |
-| `test_config.py` | 15 | Pydantic model validation, defaults, override behavior |
-| `test_agent.py` | 12 | Message serialization, agent lifecycle, status tracking |
-| `test_memory.py` | 11 | FAISS upsert, search, delete, reload, max-entry pruning at 200 cap |
-| `test_embedder.py` | 5 | 384-d output, L2 normalization, deterministic repeat calls |
-| `test_adversarial_logic.py` | 5 | Compound-word anachronisms, protected predicate locks, semantic drift detection, rollback integrity, multi-vector attack blocking |
-
-### Adversarial test details
-
-These five tests simulate deliberate attempts to break the validation layer:
-
-| Test | Attack | Result | Mechanism |
-|:-----|:-------|:------:|:----------|
-| Compound word bypass | "laser-precise hammer" in medieval context | Blocked | Hyphen splitting exposes "laser"; hits the 85-term blocklist |
-| Predicate overwrite | Set `planet=Mars`, then try `planet=Earth` | Blocked | `PROTECTED_PREDICATES` silently drops the second write |
-| Semantic drift | Medieval prose that slips in "engines roar on the highway" | Blocked | "engine" and "highway" both caught regardless of prose wrapper |
-| Ledger poisoning | Inject bad facts, trigger rollback | Restored | `_rollback_facts()` strips post-snapshot predicates; baseline intact |
-| Multi-vector scatter | "smartphone", "wifi", "helicopter" spread across a medieval draft | Blocked | All three hit the blocklist; every draft hard-rejected |
-
-*Source: [tests/test_adversarial_logic.py](tests/test_adversarial_logic.py)*
+*Source: `AppConfig` in `src/config.py`, line 42.*
 
 ---
 
@@ -331,79 +362,60 @@ These five tests simulate deliberate attempts to break the validation layer:
 
 ```
 agents/
-  parser.yaml             # model, prompt, temp, threshold per agent
-  retriever.yaml
-  critic.yaml
-  innovator.yaml
-  reasoner.yaml
-  synthesizer.yaml
-  fact_extractor.yaml
+    parser.yaml              # Per-agent config: model, prompt, temp, threshold
+    retriever.yaml
+    critic.yaml
+    innovator.yaml
+    reasoner.yaml
+    synthesizer.yaml
+    fact_extractor.yaml
 
 src/
-  agent.py                # Agent class, Ollama HTTP calls, cosine scoring
-  swarm.py                # Orchestrator: dispatch, voting, validation, synthesis
-  config.py               # Pydantic models, YAML loader, AppConfig
-  embedder.py             # all-MiniLM-L6-v2, 384-d, CPU-only
-  memory.py               # FAISS IndexFlatIP, 200-entry cap, disk persistence
-  state_manager.py        # Symbolic ledger, protected predicates, thread scoping
-  constraints.py          # Blocklists (85 medieval terms), contradiction patterns
-  web_search.py           # Optional Tavily grounding, disabled by default
-  ui/                     # PyQt6 dark theme interface
-    controller.py
-    theme.py
-    widgets/
+    swarm.py                 # Orchestrator: dispatch, voting, validation, synthesis
+    agent.py                 # Agent class, Ollama HTTP calls, cosine scoring
+    state_manager.py         # State Ledger: predicate locking, ledger I/O
+    constraints.py           # 104-term blocklists, contradiction patterns, era logic
+    config.py                # Pydantic models, YAML loader, AppConfig
+    embedder.py              # all-MiniLM-L6-v2, 384-d, CPU-only
+    memory.py                # FAISS IndexFlatIP, 200-entry cap, disk persistence
+    web_search.py            # Optional Tavily grounding (disabled by default)
+    ui/                      # PyQt6 dark theme interface
 
 data/
-  config.json             # Runtime settings (checked in)
-  threads/                # Per-thread history (gitignored)
-  memory.faiss            # FAISS index (gitignored, rebuilt at runtime)
-  memory.json             # Embedding metadata (gitignored)
-  world_state.json        # Fact ledger (gitignored, rebuilt at runtime)
+    config.json              # Runtime settings (checked in)
+    threads/                 # Per-thread history (gitignored, rebuilt at runtime)
+    memory.faiss             # FAISS index (gitignored, rebuilt at runtime)
+    world_state.json         # Fact ledger (gitignored, rebuilt at runtime)
 
-tests/                    # 256 tests, all offline, ~8 seconds
+tests/                       # 256 tests, all offline
 ```
 
 ---
 
-## Requirements
+## Limitations and Trade-offs
 
-| What | Minimum |
-|:-----|:--------|
-| OS | Linux (tested on Ubuntu 22.04) |
-| GPU | NVIDIA, 12 GB+ VRAM |
-| Python | 3.10+ |
-| Inference | [Ollama](https://ollama.com) running locally |
+This is a research prototype. It makes deliberate engineering trade-offs. Some of them have sharp edges.
 
-The embedding model downloads automatically on first run (~90 MB) and runs on CPU. No GPU needed for embeddings.
+**Latency vs. Accuracy.** A full 7-agent consensus cycle takes 10 to 40 seconds on an RTX 5070. On older cards (RTX 3060), expect longer. This is an intentional trade-off: the system prioritizes fact consistency over raw speed. Users expecting ChatGPT-tier latency will be disappointed. This is a batch processor wearing a chatbot skin.
 
-### Python dependencies
+**Synthesizer Trust Gap.** The symbolic validation layer catches problems in the *drafts*, not in the synthesizer's output. The synthesizer receives a constraint block with all locked facts, but there is no post-synthesis re-validation against the ledger. If the synthesizer hallucinates while combining safe drafts, that hallucination reaches the user. This is the single biggest architectural gap in the current design.
 
-```
-sentence-transformers>=2.2.0    faiss-cpu>=1.7.4       numpy>=1.24.0
-pydantic>=2.0.0                 pydantic-settings>=2.0.0   PyYAML>=6.0
-PyQt6==6.7.0                    requests>=2.31.0
-tavily-python>=0.5.0            python-dotenv>=1.0.0
-pytest>=7.4.0                   pytest-cov>=4.1.0      pytest-qt>=4.2.0
-```
+**Blocklist Brittleness.** The medieval era blocklist (104 terms) is a blunt instrument. It catches "truck" correctly, but it will also reject valid metaphors like "hit by a truck" used in narrator voice. The system has no nuance layer for figurative language. Other domains (medical, legal, scientific) ship with no blocklists at all and require custom `constraints.py` work.
 
----
+**Predicate Locking is One-Way.** Once `era=medieval` is written, no normal message can change it. If a user makes a typo or wants to pivot ("Actually, let's make this sci-fi"), the thread is stuck. The workaround is starting a new thread or calling `clear_thread()` programmatically. There is no "unlock" in the UI.
 
-## Known Limitations
-
-This is a research prototype. It is not hardened for production use.
-
-- **Latency.** A full 7-agent round takes 10 to 40 seconds on an RTX 5070 depending on input length and model sizes. Every agent generates a complete draft before scoring begins.
-- **Domain tuning.** The symbolic validation layer ships pre-tuned for narrative/creative and technical project conversations. Other domains will need custom blocklists and contradiction patterns in `src/constraints.py`.
-- **Storage.** Thread history and the state ledger are unencrypted JSON files on disk. There is no authentication and no multi-user support.
-- **Platform.** Tested on Ubuntu 22.04 with NVIDIA GPUs. Other Linux distros and macOS may work through Ollama but have not been verified. Windows is untested.
+**Extractor Model Sensitivity.** The Fact-Extractor must produce strict JSON on every message. Swapping `phi3:mini` for a larger, more creative model (like `llama3`) will cause JSON parse failures, breaking the state ledger pipeline. The README warns about this, but users will ignore the warning, file issues, and say "it doesn't remember anything." Short messages (under 40 characters) and questions (ending with `?`) skip extraction automatically to reduce noise.
 
 ---
 
 ## Roadmap
 
-- [ ] RAG document uploads for the Retriever agent
-- [ ] Dual-GPU support to run model groups in parallel across cards
-- [ ] Live ledger viewer in the UI (watch `world_state.json` update in real time)
+- [ ] **Post-synthesis validation.** Re-check the synthesizer's output against the state ledger before returning it to the user. This closes the trust gap described above.
+- [ ] **Nuance layer for blocklists.** Context-aware filtering that distinguishes literal usage ("drove a truck") from figurative usage ("hits like a truck") using the surrounding sentence structure.
+- [ ] **Predicate unlock via UI.** Let users deliberately override a locked predicate through an explicit confirmation flow, rather than requiring a new thread.
+- [ ] **RAG document uploads.** Drag-and-drop PDFs for the Retriever agent to index and search.
+- [ ] **Dual-GPU support.** Split model groups across two cards to cut swap latency.
+- [ ] **Live ledger viewer.** Watch `world_state.json` update in real time in the UI sidebar.
 
 ---
 
