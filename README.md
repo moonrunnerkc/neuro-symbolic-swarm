@@ -6,7 +6,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Tests](https://img.shields.io/badge/Tests-255%20Passing-brightgreen?logo=pytest&logoColor=white)](#proven-not-theoretical)
+[![Tests](https://img.shields.io/badge/Tests-256%20Passing-brightgreen?logo=pytest&logoColor=white)](#proven-not-theoretical)
 [![Agents](https://img.shields.io/badge/Agents-7%20Specialized-blueviolet)](#the-swarm)
 [![Platform](https://img.shields.io/badge/Ubuntu-22.04-E95420?logo=ubuntu&logoColor=white)]()
 [![GPU](https://img.shields.io/badge/NVIDIA-RTX%205070-76B900?logo=nvidia&logoColor=white)]()
@@ -121,7 +121,7 @@ This result is reproducible across three independent test threads: `final-proof`
 
 ### Test Suite
 
-**255 tests passing** across 11 test files:
+**256 tests passing** across 11 test files:
 
 | Test File | Tests | Covers |
 |:---|:---:|:---|
@@ -133,7 +133,7 @@ This result is reproducible across three independent test threads: `final-proof`
 | `test_agent.py` | 12 | Message serialization, agent lifecycle, status tracking |
 | `test_memory.py` | 11 | FAISS upsert, search, delete, reload, max-entry pruning |
 | `test_embedder.py` | 5 | Embedding dimensions, normalization, determinism |
-| `test_constraints.py` | 51 | Era blocklists, genre inference, anachronism detection, fact contradiction (age/role/relationship/timeline/identity), extraction validation, coverage checks |
+| `test_constraints.py` | 52 | Era blocklists, genre inference, anachronism detection, fact contradiction (age/role/relationship/timeline/identity), extraction validation, coverage checks |
 | `test_web_search.py` | 19 | Query classification, grounding block formatting, search query extraction |
 | `test_adversarial_logic.py` | 5 | Contextual anachronisms, protected predicate locks, semantic drift, rollback integrity, multi-vector attacks |
 
@@ -148,7 +148,7 @@ This result is reproducible across three independent test threads: `final-proof`
 | Multi-Vector Attack | "smartphone", "wifi", "helicopter" scattered in medieval draft | **BLOCKED** | All three terms hit the blocklist; all drafts hard-rejected, StateAnchor refusal |
 
 ```bash
-pytest tests/ -v --tb=short  # 255 passed in ~5.3s
+pytest tests/ -v --tb=short  # 256 passed in ~9.3s
 ```
 
 ---

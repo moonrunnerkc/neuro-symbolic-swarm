@@ -220,10 +220,9 @@ class SwarmChatbot:
                 user_anachronisms = find_anachronisms(query, blocklist)
                 if user_anachronisms:
                     progress("blocked — anachronisms detected")
-                    WORLD_KEYS = {"setting", "genre", "era", "timeline"}
                     world_summary = ", ".join(
                         f"{k}={v}" for k, v in pre_facts.items()
-                        if k in WORLD_KEYS
+                        if k in WORLD_ANCHOR_KEYS
                     )
                     final = (
                         f"That request conflicts with the established world for this thread. "
@@ -278,24 +277,16 @@ class SwarmChatbot:
 
         # phase 1.5: validation -- symbolic + critic filters contradictory drafts
         progress("validating drafts")
-        validated = self._validate_drafts(query, responses, query_vec, thread_id)
+        validated = self._validate_drafts(query, responses, query_vec, thread_id, pre_facts=pre_facts)
 
         # if symbolic validation issued a hard refusal (StateAnchor),
         # bypass the synthesizer entirely -- don't let it rewrite the refusal
         if len(validated) == 1 and validated[0].source == "StateAnchor":
             # roll back any facts the extractor pulled from the invalid message
             self._rollback_facts(thread_id, pre_facts)
-            # build a clean refusal from the pre-extraction world state
-            WORLD_KEYS = {"setting", "genre", "era", "timeline"}
-            world_summary = ", ".join(
-                f"{k}={v}" for k, v in pre_facts.items()
-                if k in WORLD_KEYS
-            )
-            final = (
-                f"That request conflicts with the established world for this thread. "
-                f"The current setting is: {world_summary}. "
-                f"Please rephrase your request to fit within the established setting."
-            )
+            # use the StateAnchor's refusal message directly -- it already
+            # contains the contradiction details built from pre_facts
+            final = validated[0].content
         else:
             # phase 2: synthesizer combines the validated answers
             progress("synthesizing final answer")
@@ -392,7 +383,15 @@ class SwarmChatbot:
             if not facts:
                 return
 
+            # normalize non-canonical keys to canonical ones
+            facts = self._normalize_fact_keys(facts)
+
             for key, value in facts.items():
+                # skip nested structures -- only flat string/number values
+                # are reliable enough to store as world facts
+                if isinstance(value, (dict, list)):
+                    logger.debug("skipping nested value: %s=%s", key, type(value).__name__)
+                    continue
                 str_val = str(value).strip()
                 # skip empty, blank, or trivially useless values
                 if not str_val or str_val in ('""', "''", '{}', '[]', 'null', 'None'):
@@ -428,6 +427,44 @@ class SwarmChatbot:
         except Exception as exc:
             logger.error("fact extraction error: %s", exc)
 
+    # map of common non-canonical extractor keys to canonical ones
+    _KEY_ALIASES: dict[str, str] = {
+        "project": "project_name",
+        "system_name": "project_name",
+        "name": "project_name",
+        "language": "programming_language",
+        "lang": "programming_language",
+        "database_system": "database",
+        "db": "database",
+        "database_type": "database",
+        "runtime": "framework",
+        "framework_name": "framework",
+        "team": "team_members",
+        "team_composition": "team_members",
+        "due_date": "deadline",
+        "target_date": "deadline",
+    }
+
+    @staticmethod
+    def _normalize_fact_keys(facts: dict[str, str]) -> dict[str, str]:
+        """map common extractor key variants to canonical names.
+
+        Small models ignore canonical key instructions and invent their own.
+        This catches the most common aliases without losing data.
+        """
+        normalized: dict[str, str] = {}
+        for key, value in facts.items():
+            canonical = SwarmChatbot._KEY_ALIASES.get(key, key)
+            # don't overwrite if canonical key already present
+            if canonical not in normalized:
+                normalized[canonical] = value
+            else:
+                logger.debug(
+                    "skipping duplicate canonical key %s (from %s)",
+                    canonical, key,
+                )
+        return normalized
+
     @staticmethod
     def _extract_json_object(text: str) -> dict | None:
         """pull the first valid JSON object from text, ignoring trailing junk."""
@@ -461,6 +498,22 @@ class SwarmChatbot:
                             return obj
                     except json.JSONDecodeError:
                         continue
+
+        # last resort: truncated JSON — extract whatever top-level
+        # "key": "value" pairs we can find via regex. this handles
+        # the common case where the model hits max_tokens mid-response.
+        pairs = re.findall(
+            r'"([a-z_]+)"\s*:\s*"([^"]*)"',
+            text[start:],
+        )
+        if pairs:
+            result = {k: v for k, v in pairs if v.strip()}
+            if result:
+                logger.info(
+                    "extracted %d facts from truncated JSON", len(result),
+                )
+                return result
+
         return None
 
     def _rollback_facts(
@@ -604,13 +657,16 @@ class SwarmChatbot:
         responses: list[SwarmMessage],
         query_vec: np.ndarray,
         thread_id: str = "",
+        pre_facts: dict[str, str] | None = None,
     ) -> list[SwarmMessage]:
         """pre-synthesis validation: symbolic ledger check (hard reject) then Critic."""
         if not responses:
             return responses
 
         # -- phase A: symbolic validation against the state ledger --
-        symbolically_valid = self._symbolic_validate(responses, thread_id, query)
+        symbolically_valid = self._symbolic_validate(
+            responses, thread_id, query, pre_facts=pre_facts,
+        )
 
         if len(symbolically_valid) <= 1:
             return symbolically_valid if symbolically_valid else responses
@@ -675,6 +731,7 @@ class SwarmChatbot:
         responses: list[SwarmMessage],
         thread_id: str,
         query: str = "",
+        pre_facts: dict[str, str] | None = None,
     ) -> list[SwarmMessage]:
         """Hard-reject drafts that contradict core world-building facts.
 
@@ -682,6 +739,10 @@ class SwarmChatbot:
         1. User-input anachronism scan (pre-check, blocks entire request)
         2. User-input fact contradiction scan (ages, roles, relationships)
         3. Draft-level anachronism + setting scan (per-draft filtering)
+
+        When pre_facts is supplied, uses that clean snapshot instead of the
+        live ledger — prevents extraction-poisoned values from corrupting
+        the validation.
         """
         from src.constraints import (
             WORLD_ANCHOR_KEYS,
@@ -693,17 +754,23 @@ class SwarmChatbot:
         if not thread_id:
             return responses
 
-        facts = self._state.query(thread_id, include_global=True)
-        if not facts:
+        # use pre-extraction snapshot if available, else query live state
+        if pre_facts is not None:
+            all_facts = dict(pre_facts)
+        else:
+            facts = self._state.query(thread_id, include_global=True)
+            if not facts:
+                return responses
+            all_facts = {f.predicate: f.obj for f in facts}
+
+        if not all_facts:
             return responses
 
-        # partition facts into world anchors vs all named facts
+        # partition into world anchors
         anchors: dict[str, str] = {}
-        all_facts: dict[str, str] = {}
-        for f in facts:
-            all_facts[f.predicate] = f.obj
-            if f.predicate in WORLD_ANCHOR_KEYS:
-                anchors[f.predicate] = f.obj.lower()
+        for key, val in all_facts.items():
+            if key in WORLD_ANCHOR_KEYS:
+                anchors[key] = val.lower()
 
         if not anchors:
             return responses

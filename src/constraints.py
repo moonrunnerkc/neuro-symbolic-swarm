@@ -228,24 +228,36 @@ def find_fact_contradictions(
         # -- identity/name facts (project name, language, database, etc.) --
         # detect "called X", "named X", "it's X", "written in X", "using X"
         if pred in ("project_name", "programming_language", "database"):
-            # patterns: "called X", "named X"
-            name_patterns = re.findall(
-                r"(?:(?:is\s+)?called|named)\s+(\w[\w\s+#.-]{0,25}?)(?:[.,;!?]|$|\s+(?:and|but|with|using|on|in|for|not)\b)",
-                query_lower,
-            )
-            # "it's X" but NOT "it's written in" which is a lang pattern
-            its_patterns = re.findall(
-                r"it'?s\s+(?!written\b|built\b|using\b|running\b)(\w[\w\s+#.-]{0,25}?)(?:[.,;!?]|$|\s+(?:and|but|with|using|on|in|for|not)\b)",
-                query_lower,
-            )
-            # "written in X", "using X" for language/db
-            lang_db_patterns: list[str] = []
-            if pred in ("programming_language", "database"):
-                lang_db_patterns = re.findall(
-                    r"(?:written in|(?:we'?re\s+)?using|switched to)\s+(\w[\w\s+#.-]{0,25}?)(?:[.,;!?]|$|\s+(?:and|but|with|on|in|for|not)\b)",
+            # "called X", "named X" — only for project_name
+            name_patterns: list[str] = []
+            if pred == "project_name":
+                name_patterns = re.findall(
+                    r"(?:(?:is\s+)?called|named)\s+(\w[\w\s+#.-]{0,25}?)(?:[.,;!?]|$|\s+(?:and|but|with|using|on|in|for|not)\b)",
                     query_lower,
                 )
-            for found in name_patterns + its_patterns + lang_db_patterns:
+                # "it's X" but NOT "it's written in" which is a lang pattern
+                name_patterns += re.findall(
+                    r"it'?s\s+(?!written\b|built\b|using\b|running\b)(\w[\w\s+#.-]{0,25}?)(?:[.,;!?]|$|\s+(?:and|but|with|using|on|in|for|not)\b)",
+                    query_lower,
+                )
+
+            # "written in X" — only for programming_language
+            lang_patterns: list[str] = []
+            if pred == "programming_language":
+                lang_patterns = re.findall(
+                    r"(?:written in|switched to)\s+(\w[\w\s+#.-]{0,25}?)(?:[.,;!?]|$|\s+(?:and|but|with|on|in|for|not)\b)",
+                    query_lower,
+                )
+
+            # "using X as database/db" — only for database
+            db_patterns: list[str] = []
+            if pred == "database":
+                db_patterns = re.findall(
+                    r"(?:(?:we'?re\s+)?using|switched to)\s+(\w[\w\s+#.-]{0,25}?)(?:\s+(?:as\s+(?:the\s+)?(?:database|db)|database|for\s+(?:the\s+)?(?:database|db|storage)))",
+                    query_lower,
+                )
+
+            for found in name_patterns + lang_patterns + db_patterns:
                 found = found.strip()
                 if (
                     found

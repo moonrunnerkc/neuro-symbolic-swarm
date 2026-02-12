@@ -191,8 +191,14 @@ class TestFindFactContradictions:
 
     def test_database_contradiction(self):
         facts = {"database": "CockroachDB"}
-        c = find_fact_contradictions("we're using MySQL on a single node", facts)
+        c = find_fact_contradictions("we're using MySQL as the database now", facts)
         assert any("CockroachDB" in x and "mysql" in x.lower() for x in c)
+
+    def test_database_no_false_positive_on_broker(self):
+        """'using Redis as a message broker' should NOT trigger database contradiction."""
+        facts = {"database": "CockroachDB"}
+        c = find_fact_contradictions("We're using Redis 7.2 as a message broker between services", facts)
+        assert len(c) == 0
 
     # empty inputs
     def test_empty_query(self):

@@ -10,7 +10,9 @@ prompt: >
   2. Extract concrete facts: names, locations, dates, genres, roles,
      relationships, quantities, states, preferences.
   3. Use lowercase keys with underscores.
-  4. Values should be concise strings or numbers.
+  4. Values MUST be flat strings or numbers. NEVER use nested objects,
+     arrays, or lists. If there are multiple items, join them with
+     commas in a single string value.
   5. If the message contains no extractable facts, output: {}
   6. Do NOT invent facts. Only extract what is explicitly stated.
   7. Ignore conversational filler ("hello", "thanks", etc.).
@@ -64,6 +66,6 @@ prompt: >
   Input: "How are you today?"
   Output: {}
 tools: []
-max_tokens: 256
+max_tokens: 512
 temperature: 0.1
 score_threshold: 0.0
