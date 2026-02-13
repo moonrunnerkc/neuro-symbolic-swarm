@@ -9,7 +9,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
-from src.swarm import SwarmChatbot
+from src.swarm import SwarmNexus
 from src.ui.controller import MainWindow
 
 # structured log format per project conventions
@@ -19,15 +19,15 @@ LOG_FORMAT = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 def run() -> int:
     """initialize swarm + UI and enter the event loop."""
     logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
-    logger = logging.getLogger("swarm-chatbot")
-    logger.info("starting swarm chatbot")
+    logger = logging.getLogger("neuro-symbolic-swarm")
+    logger.info("starting neuro-symbolic swarm")
 
     # start the swarm backend
-    swarm = SwarmChatbot()
+    swarm = SwarmNexus()
 
     # launch the Qt application
     app = QApplication(sys.argv)
-    app.setApplicationName("Swarm Chatbot")
+    app.setApplicationName("Neuro-Symbolic Swarm")
 
     window = MainWindow(swarm=swarm)
     window.show()

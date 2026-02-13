@@ -1,4 +1,4 @@
-# Contributing to Swarm Chatbot
+# Contributing to Neuro-Symbolic Swarm
 
 Thanks for your interest. Here is how to contribute without breaking things.
 
@@ -11,8 +11,8 @@ Thanks for your interest. Here is how to contribute without breaking things.
 ## Setup
 
 ```bash
-git clone git@github.com:moonrunnerkc/swarm-chatbot.git
-cd swarm-chatbot
+git clone git@github.com:moonrunnerkc/neuro-symbolic-swarm.git
+cd neuro-symbolic-swarm
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```

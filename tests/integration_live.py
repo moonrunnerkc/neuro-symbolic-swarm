@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from src.swarm import SwarmChatbot
+from src.swarm import SwarmNexus
 
 
 def separator(label: str) -> None:
@@ -38,7 +38,7 @@ def main() -> None:
     state_path.write_text(json.dumps({"version": 1, "threads": {}}))
 
     separator("INITIALIZING SWARM")
-    swarm = SwarmChatbot()
+    swarm = SwarmNexus()
     tid = swarm.create_thread("live-test")
     print(f"thread: {tid}")
     print(f"agents: {[a.role for a in swarm._agents]}")

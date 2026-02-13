@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Author: Bradley R. Kinnard
-"""Convenience launch script for swarm-chatbot."""
+"""Convenience launch script for neuro-symbolic-swarm."""
 
 import os
 import sys

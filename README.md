@@ -7,9 +7,9 @@
 <img src="https://img.shields.io/badge/Backend-Ollama-000000?logo=ollama&logoColor=white" alt="Ollama Backend" />
 <img src="https://img.shields.io/badge/Inference-100%25_Offline-2E8B57" alt="100% Offline" />
 
-# Swarm Chatbot
+# Neuro-Symbolic Swarm
 
-**Neuro-Symbolic Multi-Agent Orchestration Engine**
+**Multi-Agent Orchestration Engine with Symbolic State Anchoring**
 
 *Author: Bradley R. Kinnard*
 
@@ -17,7 +17,13 @@
 
 <br/>
 
-> **The Architectural Thesis:** This is a research prototype built to study the "Context Drift" and "Hallucination" problems that plague single-model systems. While it looks like a chatbot, it is really a test harness for a deterministic state engine. The core question: *can a 7-agent consensus network running on a single consumer GPU (12 GB VRAM) produce more consistent, fact-stable output than a lone model?* The answer, based on 256 automated tests and adversarial attack simulations, is a qualified yes. The system makes real trade-offs to get there. This document lays out what works, what breaks, and where the boundaries are.
+> **⚠️ ARCHITECTURAL NOTE:**
+> This is a **Deep Reasoning Engine**, not a conversational chatbot.
+> A typical query involves 7 concurrent agent generations, vector scoring, and symbolic validation.
+> **Expected Latency:** 10s – 60s per turn (depending on GPU).
+> **Design Priority:** Correctness > Speed.
+
+> **The Architectural Thesis:** This is a research prototype built to study the "Context Drift" and "Hallucination" problems that plague single-model systems. It is a test harness for a deterministic state engine. The core question: *can a 7-agent consensus network running on a single consumer GPU (12 GB VRAM) produce more consistent, fact-stable output than a lone model?* The answer, based on 256 automated tests and adversarial attack simulations, is a qualified yes. The system makes real trade-offs to get there. This document lays out what works, what breaks, and where the boundaries are.
 
 ---
 
@@ -188,8 +194,8 @@ The embedding model (`all-MiniLM-L6-v2`, 384 dimensions) auto-downloads on first
 ### 1. Installation
 
 ```bash
-git clone https://github.com/moonrunnerkc/swarm-chatbot.git
-cd swarm-chatbot
+git clone https://github.com/moonrunnerkc/neuro-symbolic-swarm.git
+cd neuro-symbolic-swarm
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -292,12 +298,12 @@ $ pytest tests/ -v --tb=short
 
 ## Programmatic API
 
-The architecture is decoupled from the UI. `SwarmChatbot` works as a standalone library.
+The architecture is decoupled from the UI. `SwarmNexus` works as a standalone library.
 
 ```python
-from src.swarm import SwarmChatbot
+from src.swarm import SwarmNexus
 
-swarm = SwarmChatbot()
+swarm = SwarmNexus()
 thread = swarm.create_thread("research-01")
 
 response = swarm.respond("The year is 2099. We are on Mars.", thread)
@@ -396,7 +402,7 @@ tests/                       # 256 tests, all offline
 
 This is a research prototype. It makes deliberate engineering trade-offs. Some of them have sharp edges.
 
-**Latency vs. Accuracy.** A full 7-agent consensus cycle takes 10 to 40 seconds on an RTX 5070. On older cards (RTX 3060), expect longer. This is an intentional trade-off: the system prioritizes fact consistency over raw speed. Users expecting ChatGPT-tier latency will be disappointed. This is a batch processor wearing a chatbot skin.
+**Latency vs. Accuracy.** A full 7-agent consensus cycle takes 10 to 40 seconds on an RTX 5070. On older cards (RTX 3060), expect longer. This is an intentional trade-off: the system prioritizes fact consistency over raw speed. This is a deep reasoning engine, not a response-speed benchmark.
 
 **Synthesizer Trust Gap.** The symbolic validation layer catches problems in the *drafts*, not in the synthesizer's output. The synthesizer receives a constraint block with all locked facts, but there is no post-synthesis re-validation against the ledger. If the synthesizer hallucinates while combining safe drafts, that hallucination reaches the user. This is the single biggest architectural gap in the current design.
 

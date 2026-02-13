@@ -176,7 +176,7 @@ class TestThreadPersistence:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             assert "old-session" in swarm._active_threads
@@ -199,7 +199,7 @@ class TestThreadPersistence:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             assert "thread-a" in swarm._active_threads
@@ -222,7 +222,7 @@ class TestThreadPersistence:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             assert "good" in swarm._active_threads
@@ -245,7 +245,7 @@ class TestThreadPersistence:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             tid = swarm.create_thread("existing")
@@ -263,7 +263,7 @@ class TestThreadPersistence:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             tid = swarm.create_thread("fresh")
@@ -355,7 +355,7 @@ class TestContextRetrieval:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             swarm.create_thread("ctx-test")
@@ -382,7 +382,7 @@ class TestContextRetrieval:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             swarm._app_config.context_window = 0
@@ -399,7 +399,7 @@ class TestContextRetrieval:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             swarm.create_thread("t1")
@@ -431,7 +431,7 @@ class TestContextRetrieval:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             swarm.create_thread("empty")
@@ -523,7 +523,7 @@ class TestClearMemory:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             # seed some memory
@@ -549,7 +549,7 @@ class TestAutoSave:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             # interval=0 in test config, so timer should be None
@@ -569,7 +569,7 @@ class TestAutoSave:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             assert swarm._auto_save_timer is not None
@@ -590,7 +590,7 @@ class TestGetStatusMemory:
         import src.swarm as swarm_mod
         original = _swap_project_root(swarm_mod, root)
         try:
-            swarm = swarm_mod.SwarmChatbot(
+            swarm = swarm_mod.SwarmNexus(
                 config_path="data/config.json", agents_dir="agents",
             )
             status = swarm.get_status()

@@ -1,12 +1,10 @@
 # Author: Bradley R. Kinnard
 """Right sidebar: neuro-symbolic diagnostics panel."""
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QGroupBox,
-    QHBoxLayout,
     QLabel,
-    QPushButton,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -34,8 +32,6 @@ from src.ui.theme import (
 
 class SidebarRight(QWidget):
     """right panel showing live system diagnostics and proof of work."""
-
-    clear_memory_requested = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -91,44 +87,6 @@ class SidebarRight(QWidget):
         ledger_layout.addWidget(self._ledger_facts)
         layout.addWidget(ledger_group)
 
-        # -- memory group --
-        memory_group = QGroupBox("Memory")
-        memory_layout = QVBoxLayout(memory_group)
-        memory_layout.setSpacing(6)
-
-        self._memory_stats = QLabel("entries: 0 | vectors: 0")
-        self._memory_stats.setStyleSheet(
-            f"color: {TEXT_SECONDARY}; font-size: {FONT_SIZE_SMALL}px;"
-        )
-        self._memory_stats.setWordWrap(True)
-        memory_layout.addWidget(self._memory_stats)
-
-        self._clear_mem_btn = QPushButton("Clear Memory")
-        self._clear_mem_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._clear_mem_btn.clicked.connect(self.clear_memory_requested.emit)
-        memory_layout.addWidget(self._clear_mem_btn)
-        layout.addWidget(memory_group)
-
-        # -- pipeline log --
-        log_group = QGroupBox("Pipeline Log")
-        log_layout = QVBoxLayout(log_group)
-
-        self._pipeline_log = QTextEdit()
-        self._pipeline_log.setReadOnly(True)
-        self._pipeline_log.setMinimumHeight(120)
-        self._pipeline_log.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {BG_DEEP};
-                color: {TEXT_SECONDARY};
-                border: 1px solid {BORDER};
-                font-size: {FONT_SIZE_SMALL}px;
-                padding: 6px;
-                font-family: "Roboto Mono", monospace;
-            }}
-        """)
-        log_layout.addWidget(self._pipeline_log)
-        layout.addWidget(log_group)
-
         layout.addStretch()
 
     # -- public methods --
@@ -177,13 +135,7 @@ class SidebarRight(QWidget):
         self._ledger_facts.setPlainText("\n".join(lines))
 
     def set_debug_stats(self, stats: dict) -> None:
-        """refresh memory stats and agent list from swarm status."""
-        mem = stats.get("memory", {})
-        self._memory_stats.setText(
-            f"entries: {mem.get('entry_count', 0)} | "
-            f"vectors: {mem.get('index_vectors', 0)} | "
-            f"threads: {len(stats.get('threads', []))}"
-        )
+        """refresh agent list from swarm status."""
         # update agent rows
         for agent_info in stats.get("agents", []):
             self.set_agent_status(
@@ -193,10 +145,8 @@ class SidebarRight(QWidget):
             )
 
     def append_log(self, text: str) -> None:
-        """add a timestamped line to the pipeline log."""
-        self._pipeline_log.append(text)
-        sb = self._pipeline_log.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        """no-op — pipeline log now lives in the main chat area monitor."""
+        pass
 
     def clear_log(self) -> None:
         self._pipeline_log.clear()

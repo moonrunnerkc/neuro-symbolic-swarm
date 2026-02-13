@@ -123,6 +123,16 @@ ROLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# appositive pattern: "Name the <role>" or "Name, the <role>,"
+# catches "Aria the chief botanist" and "Kael, the wizard,"
+APPOSITIVE_ROLE_PATTERN = re.compile(
+    r"[A-Z]\w+,?\s+the\s+(?:\d+[-–]year[-–]old\s+)?"
+    r"((?:chief |head |senior |junior |lead |master |high )?"
+    r"[a-z]\w+(?:\s+[a-z]\w+)?)"
+    r"(?:[.,;!?]|\s+(?:who|and|but|in|at|for|not|by|of|from|to|with|examined|looked|cast|walked|ran|went|said|spoke)\b|$)",
+    re.IGNORECASE,
+)
+
 # pattern: "his/her wife/husband/lover/etc" — romantic relationship claims
 ROMANTIC_TERMS: set[str] = {
     "wife", "husband", "spouse", "lover", "girlfriend", "boyfriend",
@@ -139,6 +149,36 @@ def extract_words(text: str) -> set[str]:
         if "-" in w:
             expanded.update(w.split("-"))
     return expanded
+
+
+# -- figurative language exemption --
+# patterns that signal metaphor, simile, or meta-commentary. when a blocked
+# term appears inside one of these constructions, it is figurative and should
+# not trigger a hard rejection. without this, "hit like a truck" gets blocked
+# in a medieval context even though it is a valid narrator-voice metaphor.
+
+_FIGURATIVE_PATTERNS: list[re.Pattern] = [
+    # simile: "like a <term>", "as a <term>"
+    re.compile(r"\blike\s+(?:a\s+)?(\w+)", re.IGNORECASE),
+    re.compile(r"\bas\s+(?:a\s+)?(\w+)", re.IGNORECASE),
+    # "felt like", "seemed like", "as if", "as though"
+    re.compile(r"\b(?:felt|seemed|looked|sounded)\s+like\s+(?:a\s+)?(\w+)", re.IGNORECASE),
+    re.compile(r"\bas\s+(?:if|though)\s+.*?\b(\w+)", re.IGNORECASE),
+    # meta/narrator: "what we'd call", "the equivalent of", "comparable to"
+    re.compile(r"\b(?:what\s+(?:we(?:'d)?|you(?:'d)?)\s+call)\s+(?:a\s+)?(\w+)", re.IGNORECASE),
+    re.compile(r"\b(?:equivalent|comparable)\s+(?:of|to)\s+(?:a\s+)?(\w+)", re.IGNORECASE),
+    # negation: "no <term>", "without <term>", "before the age of <term>"
+    re.compile(r"\b(?:no|without|before\s+the\s+(?:age|era|time)\s+of)\s+(\w+)", re.IGNORECASE),
+]
+
+
+def _find_figurative_terms(text: str) -> set[str]:
+    """extract terms used figuratively (similes, metaphors, negations)."""
+    figurative: set[str] = set()
+    for pat in _FIGURATIVE_PATTERNS:
+        for match in pat.finditer(text):
+            figurative.add(match.group(1).lower().strip(".,!?;:\"'()[]{}"))
+    return figurative
 
 
 def get_blocklist(anchors: dict[str, str]) -> set[str]:
@@ -158,11 +198,28 @@ def get_blocklist(anchors: dict[str, str]) -> set[str]:
 
 
 def find_anachronisms(text: str, blocklist: set[str]) -> set[str]:
-    """find blocklist words present in the given text."""
+    """find blocklist words that appear literally (not figuratively) in the text.
+
+    terms used in similes ('like a truck'), negation ('no computers'),
+    or meta-commentary ('what we'd call a phone') are exempted.
+    """
     if not blocklist:
         return set()
     words = extract_words(text)
-    return blocklist & words
+    raw_hits = blocklist & words
+    if not raw_hits:
+        return set()
+
+    # exempt terms used in figurative constructions
+    figurative = _find_figurative_terms(text)
+    literal_hits = raw_hits - figurative
+    if literal_hits != raw_hits:
+        exempted = raw_hits - literal_hits
+        logger.debug(
+            "figurative exemption: %s used in simile/metaphor context",
+            exempted,
+        )
+    return literal_hits
 
 
 def find_fact_contradictions(
@@ -346,3 +403,79 @@ def validate_extracted_facts(
         )
 
     return validated
+
+
+# -- pivot detection --
+# detects when a user explicitly asks to change a locked predicate.
+# phrases like "actually, let's make this sci-fi" or "change the era to modern"
+# signal deliberate intent, not accidental drift. the extractor should be
+# allowed to overwrite the locked value in this case.
+
+_PIVOT_PATTERNS: list[re.Pattern] = [
+    # "actually, let's make this <genre/era>"
+    re.compile(
+        r"\b(?:actually|wait|hold on|scratch that|never mind|on second thought)"
+        r"[,.]?\s+(?:let(?:'s| us)|I want to|can we|make (?:it|this))\b",
+        re.IGNORECASE,
+    ),
+    # "change the <predicate> to <value>"
+    re.compile(
+        r"\b(?:change|switch|update|set|move|convert|turn)\s+"
+        r"(?:the\s+)?(?:era|genre|setting|timeline|planet|database|"
+        r"programming.language|project.name)\s+"
+        r"(?:to|into|from\s+\w+\s+to)\s+",
+        re.IGNORECASE,
+    ),
+    # "let's switch to <genre/era>"
+    re.compile(
+        r"\blet(?:'s| us)\s+(?:switch|change|pivot|move|go)\s+"
+        r"(?:to|into|over to)\s+",
+        re.IGNORECASE,
+    ),
+    # "make this a <genre> story/project" -- deliberate reframing
+    re.compile(
+        r"\bmake\s+(?:this|it)\s+(?:a\s+)?(?:an?\s+)?\w+\s+"
+        r"(?:story|tale|narrative|project|app|system)\b",
+        re.IGNORECASE,
+    ),
+    # "I changed my mind" / "start over with"
+    re.compile(
+        r"\b(?:I\s+changed?\s+my\s+mind|start(?:ing)?\s+over\s+with)\b",
+        re.IGNORECASE,
+    ),
+]
+
+
+def detect_pivot(query: str, locked_facts: dict[str, str]) -> bool:
+    """detect if the user is deliberately requesting a world-state change.
+
+    returns True only when the query contains explicit pivot language AND
+    references a predicate that is currently locked. casual mentions of
+    genres or eras without pivot language do not qualify.
+    """
+    if not locked_facts:
+        return False
+
+    query_lower = query.lower()
+
+    # must match at least one pivot phrase
+    has_pivot_language = any(pat.search(query_lower) for pat in _PIVOT_PATTERNS)
+    if not has_pivot_language:
+        return False
+
+    # must reference a predicate that is actually locked
+    for pred in locked_facts:
+        if pred.replace("_", " ") in query_lower or pred in query_lower:
+            return True
+
+    # check if the query mentions a value from a different era/genre,
+    # which implies they want to switch away from the current one
+    for pred, val in locked_facts.items():
+        if pred in ("era", "genre"):
+            for era_key, sources in VALID_ERA_INFERENCES.items():
+                if era_key == val.lower():
+                    continue  # same era, not a pivot
+                if any(src in query_lower for src in sources):
+                    return True
+
+    return False

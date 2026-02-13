@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from src.swarm import SwarmChatbot
+from src.swarm import SwarmNexus
 from src.ui.theme import BG_PRIMARY, get_stylesheet
 from src.ui.widgets.chat_area import ChatArea
 from src.ui.widgets.sidebar_left import SidebarLeft
@@ -32,7 +32,7 @@ class SwarmWorker(QObject):
     status_updated = pyqtSignal(dict)
     progress_updated = pyqtSignal(str)
 
-    def __init__(self, swarm: SwarmChatbot):
+    def __init__(self, swarm: SwarmNexus):
         super().__init__()
         self._swarm = swarm
 
@@ -59,12 +59,12 @@ class MainWindow(QMainWindow):
 
     _dispatch_query = pyqtSignal(str, str)
 
-    def __init__(self, swarm: SwarmChatbot, parent=None):
+    def __init__(self, swarm: SwarmNexus, parent=None):
         super().__init__(parent)
         self._swarm = swarm
         self._current_thread: Optional[str] = None
 
-        self.setWindowTitle("Swarm Chatbot")
+        self.setWindowTitle("Swarm Command Console")
         self.setMinimumSize(1280, 760)
         self.setStyleSheet(get_stylesheet())
 
@@ -113,11 +113,12 @@ class MainWindow(QMainWindow):
     def _wire_signals(self) -> None:
         self._chat_area.query_submitted.connect(self._on_query_submitted)
         self._sidebar_left.thread_selected.connect(self._on_thread_selected)
+        self._sidebar_left.thread_delete_requested.connect(self._on_delete_thread)
         self._sidebar_left.new_thread_requested.connect(self._on_new_thread)
         self._sidebar_left.clear_all_threads_requested.connect(
             self._on_clear_all_threads
         )
-        self._sidebar_right.clear_memory_requested.connect(self._on_clear_memory)
+        self._sidebar_left.clear_memory_requested.connect(self._on_clear_memory)
 
     def _bootstrap(self) -> None:
         status = self._swarm.get_status()
@@ -141,9 +142,10 @@ class MainWindow(QMainWindow):
         self._sidebar_left.select_thread(default_tid)
 
         self._chat_area.add_system_message(
-            "swarm initialized. type a message to begin."
+            "swarm nexus initialized. submit a query to begin deep reasoning."
         )
         self._sidebar_right.set_debug_stats(status)
+        self._sidebar_left.update_memory_stats(status)
 
     # -- slots --
 
@@ -172,18 +174,46 @@ class MainWindow(QMainWindow):
 
     @pyqtSlot(str)
     def _on_progress(self, stage: str) -> None:
-        """update thinking indicator + agent status cards in real time."""
-        # agent status updates come as "Role:status" (e.g. "Parser:active")
+        """route swarm progress emissions to the pipeline monitor + sidebar.
+
+        structured cues:
+          "Role:active|idle|error"  -> agent status card + monitor
+          "ledger:ACTION detail"    -> ledger status in monitor
+          "Critic rejected/approved" -> critic verdict in monitor
+          plain string              -> phase label in monitor
+        """
+        # agent status transitions: "Parser:active", "Critic:idle"
         if ":" in stage and stage.split(":", 1)[1] in ("active", "idle", "error"):
             role, status = stage.split(":", 1)
             self._sidebar_left.update_agent(role, status)
-            # also update the right sidebar's agent rows
             agent = next(
                 (a for a in self._swarm._agents if a.role == role), None
             )
             if agent:
                 self._sidebar_right.set_agent_status(role, agent.model, status)
+            # also show in pipeline monitor
+            self._chat_area.update_agent_status(role, status)
+            self._sidebar_right.append_log(f"[{role}: {status.upper()}]")
             return
+
+        # ledger events: "ledger:locked", "ledger:blocked", "ledger:rejected X",
+        #                "ledger:passed X", "ledger:rollback"
+        if stage.startswith("ledger:"):
+            parts = stage[7:].split(" ", 1)
+            action = parts[0]
+            detail = parts[1] if len(parts) > 1 else ""
+            self._chat_area.update_ledger_status(action, detail)
+            self._sidebar_right.append_log(f"[Ledger: {action.upper()}] {detail}")
+            return
+
+        # critic verdicts: "Critic rejected draft 1 (Parser)"
+        if stage.startswith("Critic rejected") or stage.startswith("Critic approved"):
+            action = "rejected" if "rejected" in stage else "approved"
+            self._chat_area.update_agent_status("Critic", action, stage)
+            self._sidebar_right.append_log(stage)
+            return
+
+        # generic phase update
         self._chat_area.update_thinking_stage(stage)
         self._sidebar_right.append_log(stage)
 
@@ -196,6 +226,7 @@ class MainWindow(QMainWindow):
                 log=f"processed: {agent_info.get('messages_processed', 0)}",
             )
         self._sidebar_right.set_debug_stats(status)
+        self._sidebar_left.update_memory_stats(status)
         # update state ledger display for current thread
         self._refresh_ledger()
 
@@ -251,7 +282,9 @@ class MainWindow(QMainWindow):
     def _on_clear_memory(self) -> None:
         self._swarm.clear_memory()
         self._sidebar_right.append_log("memory cleared")
-        self._sidebar_right.set_debug_stats(self._swarm.get_status())
+        status = self._swarm.get_status()
+        self._sidebar_right.set_debug_stats(status)
+        self._sidebar_left.update_memory_stats(status)
         self._refresh_ledger()
 
     @pyqtSlot()
@@ -272,7 +305,40 @@ class MainWindow(QMainWindow):
             f"cleared {len(removed)} threads. fresh start."
         )
         self._sidebar_right.append_log(f"cleared {len(removed)} threads")
-        self._sidebar_right.set_debug_stats(self._swarm.get_status())
+        status = self._swarm.get_status()
+        self._sidebar_right.set_debug_stats(status)
+        self._sidebar_left.update_memory_stats(status)
+        self._refresh_ledger()
+
+    @pyqtSlot(str)
+    def _on_delete_thread(self, thread_id: str) -> None:
+        """delete a single thread and switch away if it was active."""
+        deleted = self._swarm.delete_thread(thread_id)
+        if not deleted:
+            return
+        self._sidebar_left.remove_thread(thread_id)
+        self._sidebar_right.append_log(f"deleted thread: {thread_id}")
+
+        # if we just deleted the active thread, switch to another or create default
+        if self._current_thread == thread_id:
+            remaining = self._swarm.get_status().get("threads", [])
+            if remaining:
+                fallback = remaining[0]
+                self._current_thread = fallback
+                self._sidebar_left.select_thread(fallback)
+                self._on_thread_selected(fallback)
+            else:
+                default_tid = "default"
+                self._swarm.create_thread(default_tid)
+                self._current_thread = default_tid
+                self._sidebar_left.add_thread(default_tid, "general conversation")
+                self._sidebar_left.select_thread(default_tid)
+                self._chat_area.clear_chat()
+                self._chat_area.add_system_message("thread deleted. fresh start.")
+
+        status = self._swarm.get_status()
+        self._sidebar_right.set_debug_stats(status)
+        self._sidebar_left.update_memory_stats(status)
         self._refresh_ledger()
 
     @pyqtSlot()
@@ -290,7 +356,9 @@ class MainWindow(QMainWindow):
             self._current_thread = tid
             self._chat_area.clear_chat()
             self._chat_area.add_system_message(f"new thread: {tid}")
-            self._sidebar_right.set_debug_stats(self._swarm.get_status())
+            status = self._swarm.get_status()
+            self._sidebar_right.set_debug_stats(status)
+            self._sidebar_left.update_memory_stats(status)
         except Exception as exc:
             self._sidebar_right.append_log(f"thread error: {exc}")
 

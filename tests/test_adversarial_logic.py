@@ -15,7 +15,7 @@ import yaml
 from src.agent import SwarmMessage
 from src.config import AppConfig
 from src.state_manager import Fact, StateManager
-from src.swarm import SwarmChatbot
+from src.swarm import SwarmNexus
 
 
 @pytest.fixture
@@ -86,7 +86,7 @@ def test_contextual_anachronism_laser_in_compound_word(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("medieval-1")
 
         # seed the world with medieval constraints
@@ -132,7 +132,7 @@ def test_protected_predicate_rejects_overwrite(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("mars-session")
 
         # first write: planet is Mars
@@ -171,7 +171,7 @@ def test_semantic_drift_medieval_to_modern(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("drift-1")
 
         swarm._state.upsert(Fact(
@@ -218,7 +218,7 @@ def test_rollback_removes_only_new_facts(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("rollback-1")
 
         # establish baseline world
@@ -279,7 +279,7 @@ def test_multi_vector_scattered_anachronisms(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("multi-1")
 
         swarm._state.upsert(Fact(

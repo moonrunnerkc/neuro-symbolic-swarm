@@ -41,12 +41,12 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-class SwarmChatbot:
-    """decentralized multi-agent swarm with emergence mechanics.
+class SwarmNexus:
+    """neuro-symbolic orchestration nexus.
 
     agents run in parallel via threads. each scores its response
-    against the query embedding. the orchestrator collects, votes,
-    and returns the best aggregated result.
+    against the query embedding. the orchestrator collects, validates
+    against the symbolic state ledger, and synthesizes the best result.
     """
 
     def __init__(
@@ -168,15 +168,15 @@ class SwarmChatbot:
         progress: callable,
     ) -> str:
         """inner respond logic, always called with _busy set."""
-        progress("embedding query")
+        progress("embedding query vector")
         query_vec = embed_text(query)
 
         # retrieve relevant past context from memory
-        progress("retrieving context")
+        progress("retrieving context from memory")
         context = self._retrieve_context(query_vec, thread_id)
 
         # store query in memory
-        progress("storing in memory")
+        progress("indexing query in FAISS")
         self._memory.upsert(MemoryEntry(
             key=f"query-{uuid.uuid4().hex[:8]}",
             text=query,
@@ -211,6 +211,8 @@ class SwarmChatbot:
                 find_fact_contradictions,
                 get_blocklist,
             )
+
+            # anachronism check requires world anchors
             anchors = {
                 k: v.lower() for k, v in pre_facts.items()
                 if k in WORLD_ANCHOR_KEYS
@@ -219,7 +221,7 @@ class SwarmChatbot:
                 blocklist = get_blocklist(anchors)
                 user_anachronisms = find_anachronisms(query, blocklist)
                 if user_anachronisms:
-                    progress("blocked — anachronisms detected")
+                    progress("ledger:blocked — anachronisms in user input")
                     world_summary = ", ".join(
                         f"{k}={v}" for k, v in pre_facts.items()
                         if k in WORLD_ANCHOR_KEYS
@@ -235,21 +237,27 @@ class SwarmChatbot:
                     progress("done")
                     return final
 
-                fact_contradictions = find_fact_contradictions(query, pre_facts)
-                if fact_contradictions:
-                    progress("blocked — contradicts established facts")
-                    final = (
-                        f"That conflicts with established facts in this thread: "
-                        f"{'; '.join(fact_contradictions)}. The state ledger is locked. "
-                        f"Please stay consistent with the established world."
-                    )
-                    self._record_exchange(query, final, thread_id)
-                    progress("done")
-                    return final
+            # fact contradiction check runs against ALL locked facts,
+            # not just world anchors — catches age/role/name conflicts too
+            fact_contradictions = find_fact_contradictions(query, pre_facts)
+            if fact_contradictions:
+                progress("ledger:blocked — contradicts locked facts")
+                final = (
+                    f"That conflicts with established facts in this thread: "
+                    f"{'; '.join(fact_contradictions)}. The state ledger is locked. "
+                    f"Please stay consistent with the established world."
+                )
+                self._record_exchange(query, final, thread_id)
+                progress("done")
+                return final
 
         # phase 1a: fact extraction -- runs alongside answerers
-        progress("extracting facts")
+        progress("extracting facts from input")
         self._run_fact_extraction(query, thread_id)
+        # report ledger state after extraction
+        ledger_facts = self._state.query(thread_id, include_global=True)
+        if ledger_facts:
+            progress(f"ledger:locked — {len(ledger_facts)} facts anchored")
 
         # phase 1a.5: web search grounding -- only when enabled + factual queries
         grounding_block = ""
@@ -272,12 +280,15 @@ class SwarmChatbot:
             a for a in self._agents
             if a.role not in ("Synthesizer", "Fact-Extractor")
         ]
-        progress("dispatching to agents")
+        progress(f"dispatching {len(answerers)} agents")
         responses = self._run_agents(answerers, seed, on_progress=progress)
 
         # phase 1.5: validation -- symbolic + critic filters contradictory drafts
-        progress("validating drafts")
-        validated = self._validate_drafts(query, responses, query_vec, thread_id, pre_facts=pre_facts)
+        progress("symbolic validation — checking drafts against ledger")
+        validated = self._validate_drafts(
+            query, responses, query_vec, thread_id,
+            pre_facts=pre_facts, on_progress=progress,
+        )
 
         # if symbolic validation issued a hard refusal (StateAnchor),
         # bypass the synthesizer entirely -- don't let it rewrite the refusal
@@ -289,7 +300,8 @@ class SwarmChatbot:
             final = validated[0].content
         else:
             # phase 2: synthesizer combines the validated answers
-            progress("synthesizing final answer")
+            progress(f"Synthesizer:active")
+            progress(f"synthesizing from {len(validated)} validated drafts")
             final = self._synthesize(
                 query, validated, query_vec, thread_id,
                 grounding_block=grounding_block,
@@ -298,10 +310,11 @@ class SwarmChatbot:
         # free synthesizer model from VRAM after synthesis
         synth_agent = next((a for a in self._agents if a.role == "Synthesizer"), None)
         if synth_agent:
+            progress("Synthesizer:idle")
             self._unload_model(synth_agent.model)
 
         # record in thread with timestamps
-        progress("saving to thread")
+        progress("persisting to thread history")
         self._record_exchange(query, final, thread_id)
 
         progress("done")
@@ -454,7 +467,7 @@ class SwarmChatbot:
         """
         normalized: dict[str, str] = {}
         for key, value in facts.items():
-            canonical = SwarmChatbot._KEY_ALIASES.get(key, key)
+            canonical = SwarmNexus._KEY_ALIASES.get(key, key)
             # don't overwrite if canonical key already present
             if canonical not in normalized:
                 normalized[canonical] = value
@@ -658,14 +671,20 @@ class SwarmChatbot:
         query_vec: np.ndarray,
         thread_id: str = "",
         pre_facts: dict[str, str] | None = None,
+        on_progress: Optional[callable] = None,
     ) -> list[SwarmMessage]:
         """pre-synthesis validation: symbolic ledger check (hard reject) then Critic."""
         if not responses:
             return responses
 
+        def _progress(msg: str) -> None:
+            if on_progress:
+                on_progress(msg)
+
         # -- phase A: symbolic validation against the state ledger --
         symbolically_valid = self._symbolic_validate(
             responses, thread_id, query, pre_facts=pre_facts,
+            on_progress=on_progress,
         )
 
         if len(symbolically_valid) <= 1:
@@ -677,6 +696,9 @@ class SwarmChatbot:
         )
         if critic is None:
             return symbolically_valid
+
+        _progress("Critic:active")
+        _progress("critic reviewing drafts for contradictions")
 
         # build validation prompt
         val_parts = [f"QUESTION: {query}\n\n"]
@@ -700,6 +722,7 @@ class SwarmChatbot:
         )
 
         result = critic.process_message(val_msg)
+        _progress("Critic:idle")
         if not result or not result.content.strip():
             logger.warning("critic pass returned empty, using symbolically valid drafts")
             return symbolically_valid
@@ -713,7 +736,9 @@ class SwarmChatbot:
                 logger.info(
                     "draft %d (%s) rejected by critic", i + 1, r.source,
                 )
+                _progress(f"Critic rejected draft {i + 1} ({r.source})")
                 continue
+            _progress(f"Critic approved draft {i + 1} ({r.source})")
             validated.append(r)
 
         if not validated:
@@ -732,6 +757,7 @@ class SwarmChatbot:
         thread_id: str,
         query: str = "",
         pre_facts: dict[str, str] | None = None,
+        on_progress: Optional[callable] = None,
     ) -> list[SwarmMessage]:
         """Hard-reject drafts that contradict core world-building facts.
 
@@ -839,6 +865,8 @@ class SwarmChatbot:
                     "symbolic reject: draft from %s has anachronisms: %s",
                     resp.source, draft_anachronisms,
                 )
+                if on_progress:
+                    on_progress(f"ledger:rejected {resp.source} — anachronisms: {', '.join(sorted(draft_anachronisms))}")
 
             # check 2: setting anchor -- substantial scenes should reference it
             if not contradicts and setting_values and len(content_lower) > 80:
@@ -848,8 +876,12 @@ class SwarmChatbot:
                         "symbolic reject: draft from %s doesn't reference setting",
                         resp.source,
                     )
+                    if on_progress:
+                        on_progress(f"ledger:rejected {resp.source} — missing setting anchor")
 
             if not contradicts:
+                if on_progress:
+                    on_progress(f"ledger:passed {resp.source}")
                 valid.append(resp)
 
         if not valid:
@@ -977,11 +1009,18 @@ class SwarmChatbot:
                     answer, grounding_block, query, synth, query_vec,
                 )
 
+            # post-synthesis ledger validation -- the synthesizer can
+            # hallucinate anachronisms while rewriting safe drafts.
+            # if it does, fall back to the best validated draft instead.
+            answer = self._post_synthesis_validate(
+                answer, responses, thread_id,
+            )
+
             return answer
 
         # synthesizer failed, fall back to highest scored response
         ranked = sorted(responses, key=lambda r: r.score, reverse=True)
-        return ranked[0].content
+        return self._clean_synthesis(ranked[0].content)
 
     @staticmethod
     def _clean_synthesis(text: str) -> str:
@@ -1001,6 +1040,14 @@ class SwarmChatbot:
             "", answer, flags=re.DOTALL | re.IGNORECASE,
         )
 
+        # strip <answer>...</answer> wrapper — keep inner content
+        answer = re.sub(
+            r"<answer>\s*(.*?)\s*</answer>",
+            r"\1", answer, flags=re.DOTALL | re.IGNORECASE,
+        )
+        # unclosed <answer> at start
+        answer = re.sub(r"^<answer>\s*", "", answer, flags=re.IGNORECASE)
+
         # strip [Source: ...], [response], [Draft ...] tags
         answer = re.sub(r"\[(?:Source|response|Draft)[^\]]*\]", "", answer, flags=re.IGNORECASE)
 
@@ -1010,6 +1057,30 @@ class SwarmChatbot:
         )
         answer = re.sub(
             r"Candidate\s+[A-Z]:\s*", "", answer, flags=re.IGNORECASE,
+        )
+
+        # strip leaked prompt instructions — models sometimes echo their
+        # system prompt fragments verbatim or paraphrased
+        answer = re.sub(
+            r",?\s*write only (?:your |the )?(?:final )?answer[^.]*[.:]?\s*",
+            "", answer, flags=re.IGNORECASE,
+        )
+        answer = re.sub(
+            r"(?:using|from) (?:the )?(?:passing|valid(?:ated)?) (?:candidates|drafts|explanations)[^.]*[.:]?\s*",
+            "", answer, flags=re.IGNORECASE,
+        )
+        answer = re.sub(
+            r"(?:^|\n)\s*(?:CRITICAL|Rules|INSTRUCTIONS|IMPORTANT):?\s*.*",
+            "", answer, flags=re.IGNORECASE,
+        )
+        # strip "After </reasoning>," prefixes the model might echo
+        answer = re.sub(
+            r"(?:After\s*</?\w+>\s*,?\s*)", "", answer, flags=re.IGNORECASE,
+        )
+        # strip lines that are pure meta-instruction echoes
+        answer = re.sub(
+            r"(?:^|\n)\s*(?:Do not mention|Never mention|Never start|Never add|Never invent)[^\n]*",
+            "", answer, flags=re.IGNORECASE,
         )
 
         answer = answer.strip()
@@ -1042,6 +1113,80 @@ class SwarmChatbot:
                 break
 
         return "\n".join(lines).strip()
+
+    def _post_synthesis_validate(
+        self,
+        answer: str,
+        validated_drafts: list[SwarmMessage],
+        thread_id: str,
+    ) -> str:
+        """validate the synthesizer's output against the state ledger.
+
+        the synthesizer can introduce anachronisms or contradict locked
+        predicates while rewriting safe drafts. this catches that. if the
+        output fails, we fall back to the highest-scored validated draft
+        (which already passed symbolic validation).
+        """
+        if not thread_id:
+            return answer
+
+        from src.constraints import (
+            WORLD_ANCHOR_KEYS,
+            find_anachronisms,
+            find_fact_contradictions,
+            get_blocklist,
+        )
+
+        facts = self._state.query(thread_id, include_global=True)
+        if not facts:
+            return answer
+
+        all_facts = {f.predicate: f.obj for f in facts}
+        anchors = {
+            k: v.lower() for k, v in all_facts.items()
+            if k in WORLD_ANCHOR_KEYS
+        }
+        if not anchors:
+            return answer
+
+        blocklist = get_blocklist(anchors)
+        violations = find_anachronisms(answer, blocklist)
+
+        if violations:
+            logger.warning(
+                "post-synthesis validation caught anachronisms in "
+                "synthesizer output: %s -- falling back to best draft",
+                violations,
+            )
+            if validated_drafts:
+                ranked = sorted(
+                    validated_drafts, key=lambda r: r.score, reverse=True,
+                )
+                return self._clean_synthesis(ranked[0].content)
+            # no drafts left either -- return a safe refusal
+            world_summary = ", ".join(
+                f"{k}={v}" for k, v in anchors.items()
+            )
+            return (
+                f"The synthesizer produced content that conflicts with the "
+                f"established world ({world_summary}). Please try rephrasing."
+            )
+
+        # also check for fact contradictions in the synthesis
+        contradictions = find_fact_contradictions(answer, all_facts)
+        if contradictions:
+            logger.warning(
+                "post-synthesis validation caught fact contradictions: %s "
+                "-- falling back to best draft",
+                contradictions,
+            )
+            if validated_drafts:
+                ranked = sorted(
+                    validated_drafts, key=lambda r: r.score, reverse=True,
+                )
+                return self._clean_synthesis(ranked[0].content)
+
+        return answer
 
     def _fact_check_pass(
         self,
@@ -1165,6 +1310,24 @@ class SwarmChatbot:
         self._state.clear_all()
         self._state.save()
         logger.info("memory and state ledger cleared by user")
+
+    def delete_thread(self, thread_id: str) -> bool:
+        """delete a single thread's history, facts, and disk file."""
+        if thread_id not in self._active_threads:
+            return False
+        del self._active_threads[thread_id]
+        # remove thread file
+        thread_file = self._threads_dir / f"{thread_id}.json"
+        if thread_file.exists():
+            try:
+                thread_file.unlink()
+            except OSError as exc:
+                logger.warning("failed to delete %s: %s", thread_file.name, exc)
+        # clear thread-scoped facts from ledger
+        self._state.clear_thread(thread_id)
+        self._state.save()
+        logger.info("deleted thread %s", thread_id)
+        return True
 
     def clear_all_threads(self) -> list[str]:
         """delete all thread files and reset runtime state. returns removed ids."""

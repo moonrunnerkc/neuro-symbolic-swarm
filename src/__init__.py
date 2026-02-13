@@ -1,2 +1,2 @@
 # Author: Bradley R. Kinnard
-# swarm-chatbot core package
+# neuro-symbolic-swarm core package

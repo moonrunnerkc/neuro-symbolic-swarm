@@ -1,5 +1,5 @@
 # Author: Bradley R. Kinnard
-"""Tests for the SwarmChatbot orchestrator."""
+"""Tests for the SwarmNexus orchestrator."""
 
 import json
 from pathlib import Path
@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from src.config import AppConfig
-from src.swarm import SwarmChatbot
+from src.swarm import SwarmNexus
 
 
 @pytest.fixture
@@ -74,7 +74,7 @@ def test_swarm_init(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(
+        swarm = SwarmNexus(
             config_path="data/config.json",
             agents_dir="agents",
         )
@@ -88,7 +88,7 @@ def test_create_thread(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         tid = swarm.create_thread("test-thread")
         assert tid == "test-thread"
         assert "test-thread" in swarm._active_threads
@@ -103,7 +103,7 @@ def test_create_thread_empty_id(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         with pytest.raises(ValueError, match="empty"):
             swarm.create_thread("")
         swarm.close()
@@ -115,7 +115,7 @@ def test_respond_unknown_thread(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         with pytest.raises(ValueError, match="unknown thread"):
             swarm.respond("hello", "nonexistent")
         swarm.close()
@@ -127,7 +127,7 @@ def test_respond_empty_query(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
         with pytest.raises(ValueError, match="empty"):
             swarm.respond("", "t1")
@@ -140,7 +140,7 @@ def test_get_status(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         status = swarm.get_status()
         assert status["agent_count"] == 3
         assert "agents" in status
@@ -156,7 +156,7 @@ def test_add_agent_dynamic(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.add_agent({
             "role": "Innovator",
             "model": "gemma2:2b",
@@ -176,11 +176,11 @@ def test_add_agent_survives_restart(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        s1 = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        s1 = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         s1.add_agent({"role": "Tester", "model": "phi3:mini", "prompt": "test"})
         s1.close()
 
-        s2 = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        s2 = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         roles = [a.role for a in s2._agents]
         assert "Tester" in roles
         s2.close()
@@ -192,7 +192,7 @@ def test_remove_agent(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         removed = swarm.remove_agent("Parser")
         assert removed is True
         assert len(swarm._agents) == 2
@@ -209,11 +209,11 @@ def test_remove_agent_survives_restart(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        s1 = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        s1 = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         s1.remove_agent("Critic")
         s1.close()
 
-        s2 = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        s2 = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         roles = [a.role for a in s2._agents]
         assert "Critic" not in roles
         assert len(s2._agents) == 2
@@ -226,7 +226,7 @@ def test_remove_nonexistent_agent(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         removed = swarm.remove_agent("FakeAgent")
         assert removed is False
         swarm.close()
@@ -239,7 +239,7 @@ def test_fact_extractor_excluded_from_answerers(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         answerers = [
             a for a in swarm._agents
             if a.role not in ("Synthesizer", "Fact-Extractor")
@@ -258,7 +258,7 @@ def test_fact_extractor_agent_loaded(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         roles = [a.role for a in swarm._agents]
         assert "Fact-Extractor" in roles
         swarm.close()
@@ -271,7 +271,7 @@ def test_state_ledger_initialized(swarm_dir):
     import src.swarm as swarm_mod
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         assert swarm._state.size == 0
         assert swarm._state.thread_count == 0
         swarm.close()
@@ -285,7 +285,7 @@ def test_clear_memory_also_clears_state(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         # manually insert a fact
         swarm._state.upsert(Fact(
             subject="test", predicate="val", obj="123", thread_id="t1",
@@ -305,7 +305,7 @@ def test_run_fact_extraction_parses_json(swarm_dir):
     from src.agent import SwarmMessage
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
 
         # mock the fact-extractor's process_message to return valid JSON
@@ -337,7 +337,7 @@ def test_run_fact_extraction_handles_bad_json(swarm_dir):
     from src.agent import SwarmMessage
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
 
         mock_result = SwarmMessage(
@@ -361,7 +361,7 @@ def test_run_fact_extraction_handles_markdown_fenced_json(swarm_dir):
     from src.agent import SwarmMessage
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
 
         mock_result = SwarmMessage(
@@ -385,14 +385,14 @@ def test_run_fact_extraction_handles_markdown_fenced_json(swarm_dir):
 
 def test_extract_json_object_clean():
     """_extract_json_object handles clean JSON."""
-    result = SwarmChatbot._extract_json_object('{"setting": "Mars"}')
+    result = SwarmNexus._extract_json_object('{"setting": "Mars"}')
     assert result == {"setting": "Mars"}
 
 
 def test_extract_json_object_trailing_text():
     """_extract_json_object handles JSON followed by model commentary."""
     raw = '{"setting": "Mars", "year": "2187"}\n\nThe above JSON represents...'
-    result = SwarmChatbot._extract_json_object(raw)
+    result = SwarmNexus._extract_json_object(raw)
     assert result == {"setting": "Mars", "year": "2187"}
 
 
@@ -403,24 +403,24 @@ def test_extract_json_object_multiline_trailing():
         'I extracted the key facts from your message.\n'
         'Here is what I found...'
     )
-    result = SwarmChatbot._extract_json_object(raw)
+    result = SwarmNexus._extract_json_object(raw)
     assert result == {"genre": "cyberpunk", "location": "Mars"}
 
 
 def test_extract_json_object_no_json():
     """_extract_json_object returns None for non-JSON text."""
-    assert SwarmChatbot._extract_json_object("no json here") is None
+    assert SwarmNexus._extract_json_object("no json here") is None
 
 
 def test_extract_json_object_empty_dict():
     """_extract_json_object returns None for empty dict."""
-    assert SwarmChatbot._extract_json_object("{}") is None
+    assert SwarmNexus._extract_json_object("{}") is None
 
 
 def test_extract_json_object_leading_text():
     """_extract_json_object ignores leading text before JSON."""
     raw = 'Here are the facts: {"name": "Kael"}'
-    result = SwarmChatbot._extract_json_object(raw)
+    result = SwarmNexus._extract_json_object(raw)
     assert result == {"name": "Kael"}
 
 
@@ -432,7 +432,7 @@ def test_synthesize_includes_constraint_block(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
 
         # seed the state ledger with facts
@@ -484,7 +484,7 @@ def test_synthesize_no_constraints_when_no_facts(swarm_dir):
     from src.agent import SwarmMessage
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
 
         from src.config import AgentConfig
@@ -522,7 +522,7 @@ def test_symbolic_validate_passes_consistent_drafts(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
         swarm._state.upsert(Fact(
             subject="user", predicate="setting", obj="Mars", thread_id="t1",
@@ -552,7 +552,7 @@ def test_symbolic_validate_rejects_anachronisms(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
         swarm._state.upsert(Fact(
             subject="user", predicate="setting", obj="Shattered Reach", thread_id="t1",
@@ -589,7 +589,7 @@ def test_symbolic_validate_rejects_missing_setting(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
         swarm._state.upsert(Fact(
             subject="user", predicate="setting", obj="Tokyo", thread_id="t1",
@@ -613,7 +613,7 @@ def test_symbolic_validate_returns_all_when_no_facts(swarm_dir):
     from src.agent import SwarmMessage
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
 
         drafts = [
@@ -632,7 +632,7 @@ def test_symbolic_validate_no_thread_id(swarm_dir):
     from src.agent import SwarmMessage
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         drafts = [
             SwarmMessage(source="Parser", content="anything", score=0.5),
         ]
@@ -650,7 +650,7 @@ def test_validate_drafts_uses_thread_id(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
         swarm._state.upsert(Fact(
             subject="user", predicate="setting", obj="Mars", thread_id="t1",
@@ -676,7 +676,7 @@ def test_clear_all_threads(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("alpha")
         swarm.create_thread("bravo")
         swarm._state.upsert(Fact(
@@ -704,7 +704,7 @@ def test_symbolic_validate_rejects_user_input_anachronisms(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
         swarm._state.upsert(Fact(
             subject="user", predicate="era", obj="medieval", thread_id="t1",
@@ -739,7 +739,7 @@ def test_symbolic_validate_rejects_character_age_contradiction(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
         swarm._state.upsert(Fact(
             subject="user", predicate="era", obj="medieval", thread_id="t1",
@@ -772,7 +772,7 @@ def test_symbolic_validate_rejects_role_contradiction(swarm_dir):
     from src.state_manager import Fact
     original = _swap_root(swarm_mod, swarm_dir)
     try:
-        swarm = SwarmChatbot(config_path="data/config.json", agents_dir="agents")
+        swarm = SwarmNexus(config_path="data/config.json", agents_dir="agents")
         swarm.create_thread("t1")
         swarm._state.upsert(Fact(
             subject="user", predicate="era", obj="medieval", thread_id="t1",

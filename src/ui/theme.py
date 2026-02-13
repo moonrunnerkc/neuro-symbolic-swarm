@@ -40,10 +40,10 @@ USER_BUBBLE_BORDER = "#2A2A40"
 SWARM_BUBBLE = "#0F1A2A"
 SWARM_BUBBLE_BORDER = "#1A3050"
 
-# -- send button (distinct bright blue) --
-SEND_BG = "#2A6FD0"
-SEND_HOVER = "#3580E8"
-SEND_PRESSED = "#1E5AAA"
+# -- send button (high contrast, punchy) --
+SEND_BG = "#1D8CF8"
+SEND_HOVER = "#45A5FF"
+SEND_PRESSED = "#0D6FD4"
 
 # -- typography --
 FONT_FAMILY = "Roboto Mono"
@@ -133,10 +133,12 @@ def get_stylesheet() -> str:
     QPushButton#sendButton {{
         background-color: {SEND_BG};
         color: {TEXT_BRIGHT};
-        border: none;
+        border: 1px solid {ACCENT_HOVER};
         border-radius: 8px;
+        padding: 6px 20px;
         font-size: {FONT_SIZE}px;
         font-weight: bold;
+        letter-spacing: 0.5px;
     }}
     QPushButton#sendButton:hover {{
         background-color: {SEND_HOVER};

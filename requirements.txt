@@ -1,5 +1,5 @@
 # Author: Bradley R. Kinnard
-# pinned dependencies for swarm-chatbot
+# pinned dependencies for neuro-symbolic-swarm
 #
 # NOTE: torch/torchvision/torchaudio must be installed from the
 # nightly cu128 index for Blackwell (sm_120) GPU support:

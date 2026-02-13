@@ -24,7 +24,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/).
 - PyQt6 dark UI with thread management, agent status cards, and memory controls
 - YAML-driven agent configuration with per-agent model, temperature, and threshold
 - Any Ollama-compatible model can be assigned to any agent via YAML config
-- Programmatic API via `SwarmChatbot` class
+- Programmatic API via `SwarmNexus` class
 - Optional web search grounding via Tavily
 - 256 tests across 11 test files, all running offline
 - Offline-first design, no cloud dependencies
