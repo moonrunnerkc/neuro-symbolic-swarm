@@ -55,7 +55,7 @@ The pipeline in four steps:
 
 3. **Symbolic Validation.** Survivors are cross-checked against an immutable State Ledger. Any draft containing anachronisms, fact contradictions, or setting violations is physically rejected before synthesis. If every draft fails, the ledger rolls back to its pre-message state.
 
-4. **Synthesis.** A final agent folds the validated drafts into one coherent response. The synthesizer receives a constraint block listing all locked facts from the ledger, forcing it to stay within bounds.
+4. **Synthesis + Post-Validation.** A final agent folds the validated drafts into one coherent response. The synthesizer receives a constraint block listing all locked facts from the ledger. After synthesis, `_post_synthesis_validate()` re-checks the output for anachronisms and fact contradictions — if the synthesizer introduced violations while rewriting, the system falls back to the best validated draft. Output is then cleaned of any leaked `<reasoning>` tags, prompt instruction echoes, and `<answer>` wrappers.
 
 ---
 
@@ -71,7 +71,7 @@ Most retrieval-augmented systems rely on vector similarity, which is probabilist
 setting   genre   era   timeline   planet   project_name   programming_language   database
 ```
 
-**The Result:** Once the ledger records `era=medieval`, that value is sealed for the life of the thread. No subsequent hallucination, no creative drift, and no user trick can overwrite it through the normal pipeline. The system creates a "truth anchor" that persists across the entire conversation.
+**The Result:** Once the ledger records `era=medieval`, that value is sealed for the life of the thread. No subsequent hallucination, no creative drift, and no user trick can overwrite it through the normal pipeline. The system creates a "truth anchor" that persists across the entire conversation. The fact contradiction gate runs against **all** locked predicates (not just world anchors), catching age, role, name, and relationship contradictions via explicit patterns and appositive detection (e.g., "Kael the wizard" when `protagonist_role=blacksmith`).
 
 **The Escape Hatch:** Protected predicates are locked against *accidental overwrites from extraction*, not against deliberate resets. The `clear_thread()` method wipes all facts for a thread (including locked ones), and the `delete()` method can remove individual predicates programmatically. If a user genuinely needs to pivot ("Actually, make this a time-travel story"), they start a new thread or the application calls `clear_thread()`.
 
@@ -326,6 +326,7 @@ swarm.close()
 | `get_thread_history(id)` | Pull raw message log for a thread |
 | `clear_memory()` | Wipe the FAISS index and state ledger |
 | `clear_all_threads()` | Delete all thread history files |
+| `delete_thread(thread_id)` | Delete a single thread's history, facts, and disk file |
 | `close()` | Graceful shutdown, persists state to disk |
 
 ---
@@ -404,7 +405,7 @@ This is a research prototype. It makes deliberate engineering trade-offs. Some o
 
 **Latency vs. Accuracy.** A full 7-agent consensus cycle takes 10 to 40 seconds on an RTX 5070. On older cards (RTX 3060), expect longer. This is an intentional trade-off: the system prioritizes fact consistency over raw speed. This is a deep reasoning engine, not a response-speed benchmark.
 
-**Synthesizer Trust Gap.** The symbolic validation layer catches problems in the *drafts*, not in the synthesizer's output. The synthesizer receives a constraint block with all locked facts, but there is no post-synthesis re-validation against the ledger. If the synthesizer hallucinates while combining safe drafts, that hallucination reaches the user. This is the single biggest architectural gap in the current design.
+**Synthesizer Trust Gap (Partially Closed).** The system now runs post-synthesis validation via `_post_synthesis_validate()`. After the synthesizer produces its final output, the engine re-checks it against the state ledger for anachronisms and fact contradictions. If the output fails, the system falls back to the highest-scored validated draft. Additionally, `_clean_synthesis()` strips leaked `<reasoning>` tags, `<answer>` wrappers, and prompt instruction echoes. This closes the original trust gap for most cases, though adversarial prompt injection at the synthesis stage remains a theoretical risk.
 
 **Blocklist Brittleness.** The medieval era blocklist (104 terms) is a blunt instrument. It catches "truck" correctly, but it will also reject valid metaphors like "hit by a truck" used in narrator voice. The system has no nuance layer for figurative language. Other domains (medical, legal, scientific) ship with no blocklists at all and require custom `constraints.py` work.
 
@@ -416,12 +417,14 @@ This is a research prototype. It makes deliberate engineering trade-offs. Some o
 
 ## Roadmap
 
-- [ ] **Post-synthesis validation.** Re-check the synthesizer's output against the state ledger before returning it to the user. This closes the trust gap described above.
-- [ ] **Nuance layer for blocklists.** Context-aware filtering that distinguishes literal usage ("drove a truck") from figurative usage ("hits like a truck") using the surrounding sentence structure.
+- [x] **Post-synthesis validation.** Re-check the synthesizer's output against the state ledger before returning it to the user. Implemented as `_post_synthesis_validate()` — catches anachronisms and fact contradictions in synthesized output, falls back to the best validated draft.
+- [x] **Nuance layer for blocklists.** Context-aware filtering that distinguishes literal usage ("drove a truck") from figurative usage ("hits like a truck") using surrounding sentence structure. Implemented via `_FIGURATIVE_PATTERNS` in `constraints.py`.
+- [x] **Live ledger viewer.** Watch the state ledger update in real time in the UI sidebar. Implemented as the "State Ledger" panel in the right sidebar diagnostics.
+- [x] **Pipeline monitor in chat area.** Live streaming status of each agent's progress, ledger actions, and constraint decisions displayed inline above the response.
+- [x] **Individual thread deletion.** Right-click context menu on threads in the left sidebar.
 - [ ] **Predicate unlock via UI.** Let users deliberately override a locked predicate through an explicit confirmation flow, rather than requiring a new thread.
 - [ ] **RAG document uploads.** Drag-and-drop PDFs for the Retriever agent to index and search.
 - [ ] **Dual-GPU support.** Split model groups across two cards to cut swap latency.
-- [ ] **Live ledger viewer.** Watch `world_state.json` update in real time in the UI sidebar.
 
 ---
 

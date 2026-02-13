@@ -149,8 +149,9 @@ class SidebarRight(QWidget):
         pass
 
     def clear_log(self) -> None:
-        self._pipeline_log.clear()
+        """no-op — pipeline log removed."""
+        pass
 
     # keep backward compat for any code calling append_debug
     def append_debug(self, text: str) -> None:
-        self.append_log(text)
+        pass
