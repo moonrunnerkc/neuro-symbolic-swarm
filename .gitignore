@@ -1,0 +1,55 @@
+# python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# pytest
+.pytest_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# model files (too large for git)
+*.gguf
+*.bin
+*.safetensors
+
+# FAISS index and memory (regenerated at runtime)
+data/memory.faiss
+data/memory.json
+
+# thread data (user-specific conversations)
+data/threads/*.json
+!data/threads/.gitkeep
+
+# world state (regenerated per session)
+data/world_state.json
+
+# logs
+data/logs.json
+*.log
+
+# env files
+.env
+.env.local

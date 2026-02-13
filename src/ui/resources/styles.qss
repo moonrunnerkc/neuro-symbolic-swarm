@@ -1,0 +1,4 @@
+/* Author: Bradley R. Kinnard */
+/* Grok-style dark theme stylesheet -- loaded by theme.py */
+/* this file exists as a reference/override; the primary QSS
+   is generated programmatically in theme.py for flexibility */

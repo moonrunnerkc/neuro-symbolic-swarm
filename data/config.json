@@ -1,0 +1,14 @@
+{
+  "theme": "dark",
+  "agent_count": 6,
+  "score_threshold": 0.21,
+  "max_cycles": 10,
+  "max_tokens": 2048,
+  "temperature": 0.7,
+  "default_model": "dolphin-mistral:7b",
+  "log_level": "INFO",
+  "context_window": 8,
+  "cross_thread_memory": false,
+  "auto_save_interval": 60,
+  "web_search_enabled": false
+}
