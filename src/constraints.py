@@ -124,13 +124,14 @@ ROLE_PATTERN = re.compile(
 )
 
 # appositive pattern: "Name the <role>" or "Name, the <role>,"
-# catches "Aria the chief botanist" and "Kael, the wizard,"
+# only matches after proper names (not "The" or common determiners)
+# captures single-word roles, or "adjective noun" pairs with known role prefixes
 APPOSITIVE_ROLE_PATTERN = re.compile(
-    r"[A-Z]\w+,?\s+the\s+(?:\d+[-–]year[-–]old\s+)?"
-    r"((?:chief |head |senior |junior |lead |master |high )?"
-    r"[a-z]\w+(?:\s+[a-z]\w+)?)"
-    r"(?:[.,;!?]|\s+(?:who|and|but|in|at|for|not|by|of|from|to|with|examined|looked|cast|walked|ran|went|said|spoke)\b|$)",
-    re.IGNORECASE,
+    r"(?<![Tt]he\s)(?<![Aa]\s)(?<![Aa]n\s)"
+    r"([A-Z][a-z]+),?\s+the\s+(?:\d+[-–]year[-–]old\s+)?"
+    r"((?:chief|head|senior|junior|lead|master|high)\s+[a-z]{3,}"
+    r"|[a-z]{3,})"
+    r"(?:\s*[.,;!?]|\s+(?:who|and|of|in|at|on)\b|\s)",
 )
 
 # pattern: "his/her wife/husband/lover/etc" — romantic relationship claims
@@ -262,9 +263,20 @@ def find_fact_contradictions(
 
         # -- role/occupation facts --
         if any(k in pred for k in ("role", "occupation", "job", "class")):
+            # explicit role assertions: "is a X", "was a X", etc.
             for match in ROLE_PATTERN.finditer(query_lower):
                 found_role = match.group(1).strip()
-                # only flag if the claimed role is truly different
+                if (
+                    found_role not in val_lower
+                    and val_lower not in found_role
+                    and len(found_role) > 2
+                ):
+                    contradictions.append(
+                        f"{pred} is '{val}', not '{found_role}'"
+                    )
+            # appositive forms: "Aria the botanist", "Kael, the wizard,"
+            for match in APPOSITIVE_ROLE_PATTERN.finditer(query):
+                found_role = match.group(2).strip().lower()
                 if (
                     found_role not in val_lower
                     and val_lower not in found_role
